@@ -5,29 +5,40 @@ pub mod search;
 pub mod slugify;
 pub mod taxonomies;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use globset::{Glob, GlobSet, GlobSetBuilder};
-use serde_derive::{Deserialize, Serialize};
+use globset::GlobSet;
+use serde::{Deserialize, Serialize};
 use toml::Value as Toml;
 
+use crate::TaxonomyConfig;
 use crate::theme::Theme;
-use errors::{bail, Error, Result};
+use errors::{Result, anyhow, bail};
 use utils::fs::read_file;
+use utils::globs::build_ignore_glob_set;
+use utils::slugs::slugify_paths;
 
 // We want a default base url for tests
-static DEFAULT_BASE_URL: &str = "http://a-website.com";
+const DEFAULT_BASE_URL: &str = "http://a-website.com";
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Mode {
     Build,
     Serve,
     Check,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExcludePaginatedPagesInSitemap {
+    None,
+    All,
+}
+
 #[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Config {
     /// Base URL of the site, the only required config argument
     pub base_url: String,
@@ -42,21 +53,25 @@ pub struct Config {
     /// The language used in the site. Defaults to "en"
     pub default_language: String,
     /// The list of supported languages outside of the default one
-    pub languages: HashMap<String, languages::LanguageOptions>,
+    pub languages: BTreeMap<String, languages::LanguageOptions>,
     /// The translations strings for the default language
-    translations: HashMap<String, String>,
+    translations: BTreeMap<String, String>,
 
-    /// Whether to generate a feed. Defaults to false.
-    pub generate_feed: bool,
+    /// Whether to generate feeds. Defaults to false.
+    pub generate_feeds: bool,
     /// The number of articles to include in the feed. Defaults to including all items.
     pub feed_limit: Option<usize>,
-    /// The filename to use for feeds. Used to find the template, too.
-    /// Defaults to "atom.xml", with "rss.xml" also having a template provided out of the box.
-    pub feed_filename: String,
+    /// The filenames to use for feeds. Used to find the templates, too.
+    /// Defaults to ["atom.xml"], with "rss.xml" also having a template provided out of the box.
+    pub feed_filenames: Vec<String>,
     /// If set, files from static/ will be hardlinked instead of copied to the output dir.
     pub hard_link_static: bool,
-
-    pub taxonomies: Vec<taxonomies::Taxonomy>,
+    pub taxonomies: Vec<TaxonomyConfig>,
+    /// Optional base path for all taxonomies. If set, all taxonomy paths will be relative to this path.
+    /// For example, if taxonomy_root is "blog" and taxonomy is "tags", the path will be /blog/tags/
+    pub taxonomy_root: Option<String>,
+    /// The default author for pages.
+    pub author: Option<String>,
 
     /// Whether to compile the `sass` directory and output the css files into the static folder
     pub compile_sass: bool,
@@ -68,8 +83,18 @@ pub struct Config {
     /// Had to remove the PartialEq derive because GlobSet does not implement it. No impact
     /// because it's unused anyway (who wants to sort Configs?).
     pub ignored_content: Vec<String>,
-    #[serde(skip_serializing, skip_deserializing)] // not a typo, 2 are needed
+    #[serde(skip)]
     pub ignored_content_globset: Option<GlobSet>,
+
+    /// A list of file glob patterns to ignore when processing the static folder. Defaults to none.
+    pub ignored_static: Vec<String>,
+    #[serde(skip)]
+    pub ignored_static_globset: Option<GlobSet>,
+
+    /// A list of file glob patterns to skip templating in content. Defaults to none.
+    pub skip_content_templating: Vec<String>,
+    #[serde(skip)]
+    pub skip_content_templating_globset: Option<GlobSet>,
 
     /// The mode Zola is currently being ran on. Some logging/feature can differ depending on the
     /// command being used.
@@ -77,6 +102,8 @@ pub struct Config {
     pub mode: Mode,
 
     pub output_dir: String,
+    /// Whether dotfiles inside the output directory are preserved when rebuilding the site
+    pub preserve_dotfiles_in_output: bool,
 
     pub link_checker: link_checker::LinkChecker,
     /// The setup for which slugification strategies to use for paths, taxonomies and anchors
@@ -85,8 +112,14 @@ pub struct Config {
     pub search: search::Search,
     /// The config for the Markdown rendering: syntax highlighting and everything
     pub markdown: markup::Markdown,
-    /// All user params set in [extra] in the config
-    pub extra: HashMap<String, Toml>,
+    /// All user params set in `[extra]` in the config
+    pub extra: BTreeMap<String, Toml>,
+    /// Enables the generation of Sitemap.xml
+    pub generate_sitemap: bool,
+    /// Enables the generation of robots.txt
+    pub generate_robots_txt: bool,
+    /// Whether to exclude paginated pages in sitemap; can take values "none", "all"
+    pub exclude_paginated_pages_in_sitemap: ExcludePaginatedPagesInSitemap,
 }
 
 #[derive(Serialize)]
@@ -95,13 +128,20 @@ pub struct SerializedConfig<'a> {
     mode: Mode,
     title: &'a Option<String>,
     description: &'a Option<String>,
-    languages: HashMap<&'a String, &'a languages::LanguageOptions>,
+    languages: BTreeMap<&'a String, &'a languages::LanguageOptions>,
     default_language: &'a str,
     generate_feed: bool,
-    feed_filename: &'a str,
-    taxonomies: &'a [taxonomies::Taxonomy],
+    generate_feeds: bool,
+    feed_filenames: &'a [String],
+    taxonomies: &'a [taxonomies::TaxonomyConfig],
+    author: &'a Option<String>,
     build_search_index: bool,
-    extra: &'a HashMap<String, Toml>,
+    extra: &'a BTreeMap<String, Toml>,
+    markdown: &'a markup::Markdown,
+    search: search::SerializedSearch<'a>,
+    generate_sitemap: bool,
+    generate_robots_txt: bool,
+    exclude_paginated_pages_in_sitemap: ExcludePaginatedPagesInSitemap,
 }
 
 impl Config {
@@ -123,60 +163,105 @@ impl Config {
             languages::validate_code(code)?;
         }
 
-        config.add_default_language();
+        config.add_default_language()?;
+        config.slugify_taxonomies();
+        config.link_checker.resolve_globset()?;
 
-        if !config.ignored_content.is_empty() {
-            // Convert the file glob strings into a compiled glob set matcher. We want to do this once,
-            // at program initialization, rather than for every page, for example. We arrange for the
-            // globset matcher to always exist (even though it has to be an inside an Option at the
-            // moment because of the TOML serializer); if the glob set is empty the `is_match` function
-            // of the globber always returns false.
-            let mut glob_set_builder = GlobSetBuilder::new();
-            for pat in &config.ignored_content {
-                let glob = match Glob::new(pat) {
-                    Ok(g) => g,
-                    Err(e) => bail!("Invalid ignored_content glob pattern: {}, error = {}", pat, e),
-                };
-                glob_set_builder.add(glob);
-            }
-            config.ignored_content_globset =
-                Some(glob_set_builder.build().expect("Bad ignored_content in config file."));
-        }
+        let content_glob_set = build_ignore_glob_set(&config.ignored_content, "ignored_content")?;
+        config.ignored_content_globset = Some(content_glob_set);
+
+        let static_glob_set = build_ignore_glob_set(&config.ignored_static, "ignored_static")?;
+        config.ignored_static_globset = Some(static_glob_set);
+
+        let skip_templating_glob_set =
+            build_ignore_glob_set(&config.skip_content_templating, "skip_content_templating")?;
+        config.skip_content_templating_globset = Some(skip_templating_glob_set);
 
         Ok(config)
     }
 
     pub fn default_for_test() -> Self {
         let mut config = Config::default();
-        config.add_default_language();
+        config.add_default_language().unwrap();
+        config.slugify_taxonomies();
         config
     }
 
     /// Parses a config file from the given path
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Config> {
         let path = path.as_ref();
-        let content =
-            read_file(path).map_err(|e| errors::Error::chain("Failed to load config", e))?;
+        let content = read_file(path)?;
 
         let mut config = Config::parse(&content)?;
         let config_dir = path
             .parent()
-            .ok_or_else(|| Error::msg("Failed to find directory containing the config file."))?;
+            .ok_or_else(|| anyhow!("Failed to find directory containing the config file."))?;
 
         // this is the step at which missing extra syntax and highlighting themes are raised as errors
-        config.markdown.init_extra_syntaxes_and_highlight_themes(config_dir)?;
+        if let Some(highlight) = config.markdown.highlighting.as_mut() {
+            highlight.init(config_dir)?;
+        }
+
+        config.markdown.validate_external_links_class()?;
 
         Ok(config)
     }
 
+    pub fn slugify_taxonomies(&mut self) {
+        for lang_options in self.languages.values_mut() {
+            for tax_def in lang_options.taxonomies.iter_mut() {
+                tax_def.slug = slugify_paths(&tax_def.name, self.slugify.taxonomies);
+            }
+        }
+    }
+
+    /// Gets the path to use for the given combo of lang/taxo
+    pub fn get_taxonomy_path(&self, lang: &str, taxo: &TaxonomyConfig) -> String {
+        let slug = &taxo.slug;
+        if lang != self.default_language {
+            if let Some(ref taxo_root) = self.taxonomy_root {
+                format!("/{lang}/{taxo_root}/{slug}/")
+            } else {
+                format!("/{lang}/{slug}/")
+            }
+        } else if let Some(ref taxo_root) = self.taxonomy_root {
+            format!("/{taxo_root}/{slug}/")
+        } else {
+            format!("/{slug}/")
+        }
+    }
+
+    pub fn get_taxonomy_term_path(
+        &self,
+        lang: &str,
+        taxo: &TaxonomyConfig,
+        term_slug: &str,
+    ) -> String {
+        let taxo_slug = &taxo.slug;
+        if lang != self.default_language {
+            if let Some(ref taxo_root) = self.taxonomy_root {
+                format!("/{lang}/{taxo_root}/{taxo_slug}/{term_slug}/")
+            } else {
+                format!("/{lang}/{taxo_slug}/{term_slug}/")
+            }
+        } else if let Some(ref taxo_root) = self.taxonomy_root {
+            format!("/{taxo_root}/{taxo_slug}/{term_slug}/")
+        } else {
+            format!("/{taxo_slug}/{term_slug}/")
+        }
+    }
+
     /// Makes a url, taking into account that the base url might have a trailing slash
     pub fn make_permalink(&self, path: &str) -> String {
-        let trailing_bit =
-            if path.ends_with('/') || path.ends_with(&self.feed_filename) || path.is_empty() {
-                ""
-            } else {
-                "/"
-            };
+        let trailing_bit = if path.ends_with('/')
+            || self.feed_filenames.iter().any(|feed_filename| path.ends_with(feed_filename))
+            || path.is_empty()
+            || path.contains("#")
+        {
+            ""
+        } else {
+            "/"
+        };
 
         // Index section with a base url that has a trailing slash
         if self.base_url.ends_with('/') && path == "/" {
@@ -193,26 +278,30 @@ impl Config {
         }
     }
 
-    /// Adds the default language to the list of languages if not present
-    pub fn add_default_language(&mut self) {
-        // We automatically insert a language option for the default language *if* it isn't present
-        // TODO: what to do if there is like an empty dict for the lang? merge it or use the language
-        // TODO: as source of truth?
-        if !self.languages.contains_key(&self.default_language) {
-            self.languages.insert(
-                self.default_language.clone(),
-                languages::LanguageOptions {
-                    title: self.title.clone(),
-                    description: self.description.clone(),
-                    generate_feed: self.generate_feed,
-                    feed_filename: self.feed_filename.clone(),
-                    build_search_index: self.build_search_index,
-                    taxonomies: self.taxonomies.clone(),
-                    search: self.search.clone(),
-                    translations: self.translations.clone(),
-                },
-            );
+    /// Adds the default language to the list of languages if options for it are specified at base level of config.toml.
+    /// If section for the same language also exists, the options at this section and base are merged and then adds it
+    /// to list.
+    pub fn add_default_language(&mut self) -> Result<()> {
+        let mut base_language_options = languages::LanguageOptions {
+            title: self.title.clone(),
+            description: self.description.clone(),
+            generate_feeds: self.generate_feeds,
+            feed_filenames: self.feed_filenames.clone(),
+            build_search_index: self.build_search_index,
+            taxonomies: self.taxonomies.clone(),
+            search: self.search.clone(),
+            translations: self.translations.clone(),
+        };
+
+        if let Some(section_language_options) = self.languages.get(&self.default_language) {
+            if base_language_options == languages::LanguageOptions::default() {
+                return Ok(());
+            }
+            base_language_options.merge(section_language_options)?;
         }
+        self.languages.insert(self.default_language.clone(), base_language_options);
+
+        Ok(())
     }
 
     /// Merges the extra data from the theme with the config extra data
@@ -236,8 +325,8 @@ impl Config {
     }
 
     /// Returns all the languages settings for languages other than the default one
-    pub fn other_languages(&self) -> HashMap<&str, &languages::LanguageOptions> {
-        let mut others = HashMap::new();
+    pub fn other_languages(&self) -> BTreeMap<&str, &languages::LanguageOptions> {
+        let mut others = BTreeMap::new();
         for (k, v) in &self.languages {
             if k == &self.default_language {
                 continue;
@@ -247,13 +336,29 @@ impl Config {
         others
     }
 
+    pub fn other_languages_codes(&self) -> Vec<&str> {
+        self.languages.keys().filter(|k| *k != &self.default_language).map(|k| k.as_str()).collect()
+    }
+
+    pub fn needs_search_index(&self) -> bool {
+        if self.build_search_index {
+            true
+        } else {
+            self.other_languages().values().any(|x| x.build_search_index)
+        }
+    }
+
     /// Is this site using i18n?
     pub fn is_multilingual(&self) -> bool {
-        !self.other_languages().is_empty()
+        self.languages.iter().len() > 1
     }
 
     pub fn is_in_check_mode(&self) -> bool {
         self.mode == Mode::Check
+    }
+
+    pub fn should_exclude_paginated_pages_in_sitemap(&self) -> bool {
+        self.exclude_paginated_pages_in_sitemap == ExcludePaginatedPagesInSitemap::All
     }
 
     pub fn enable_serve_mode(&mut self) {
@@ -263,7 +368,7 @@ impl Config {
     pub fn enable_check_mode(&mut self) {
         self.mode = Mode::Check;
         // Disable syntax highlighting since the results won't be used and it is slow
-        self.markdown.highlight_code = false;
+        self.markdown.highlighting = None;
     }
 
     pub fn get_translation(&self, lang: &str, key: &str) -> Result<String> {
@@ -272,18 +377,23 @@ impl Config {
                 .translations
                 .get(key)
                 .ok_or_else(|| {
-                    Error::msg(format!(
-                        "Translation key '{}' for language '{}' is missing",
-                        key, lang
-                    ))
+                    anyhow!("Translation key '{}' for language '{}' is missing", key, lang)
                 })
-                .map(|term| term.to_string())
+                .cloned()
         } else {
             bail!("Language '{}' not found.", lang)
         }
     }
 
-    pub fn serialize(&self, lang: &str) -> SerializedConfig {
+    pub fn has_taxonomy(&self, name: &str, lang: &str) -> bool {
+        if let Some(lang_options) = self.languages.get(lang) {
+            lang_options.taxonomies.iter().any(|t| t.name == name)
+        } else {
+            false
+        }
+    }
+
+    pub fn serialize(&self, lang: &str) -> SerializedConfig<'_> {
         let options = &self.languages[lang];
 
         SerializedConfig {
@@ -293,11 +403,18 @@ impl Config {
             description: &options.description,
             languages: self.languages.iter().filter(|(k, _)| k.as_str() != lang).collect(),
             default_language: &self.default_language,
-            generate_feed: options.generate_feed,
-            feed_filename: &options.feed_filename,
+            generate_feed: options.generate_feeds,
+            generate_feeds: options.generate_feeds,
+            feed_filenames: &options.feed_filenames,
             taxonomies: &options.taxonomies,
+            author: &self.author,
             build_search_index: options.build_search_index,
             extra: &self.extra,
+            markdown: &self.markdown,
+            search: options.search.serialize(),
+            generate_sitemap: self.generate_sitemap,
+            generate_robots_txt: self.generate_robots_txt,
+            exclude_paginated_pages_in_sitemap: self.exclude_paginated_pages_in_sitemap,
         }
     }
 }
@@ -325,41 +442,53 @@ pub fn merge(into: &mut Toml, from: &Toml) -> Result<()> {
         }
         _ => {
             // Trying to merge a table with something else
-            Err(Error::msg(&format!("Cannot merge config.toml with theme.toml because the following values have incompatibles types:\n- {}\n - {}", into, from)))
+            Err(anyhow!(
+                "Cannot merge config.toml with theme.toml because the following values have incompatibles types:\n- {}\n - {}",
+                into,
+                from
+            ))
         }
     }
 }
 
 impl Default for Config {
     fn default() -> Config {
-        let mut conf = Config {
+        Config {
             base_url: DEFAULT_BASE_URL.to_string(),
             title: None,
             description: None,
             theme: None,
             default_language: "en".to_string(),
-            languages: HashMap::new(),
-            generate_feed: false,
+            languages: BTreeMap::new(),
+            generate_feeds: false,
             feed_limit: None,
-            feed_filename: "atom.xml".to_string(),
+            feed_filenames: vec!["atom.xml".to_string()],
             hard_link_static: false,
             taxonomies: Vec::new(),
+            taxonomy_root: None,
+            author: None,
             compile_sass: false,
             minify_html: false,
             mode: Mode::Build,
             build_search_index: false,
             ignored_content: Vec::new(),
             ignored_content_globset: None,
-            translations: HashMap::new(),
+            ignored_static: Vec::new(),
+            ignored_static_globset: None,
+            skip_content_templating: Vec::new(),
+            skip_content_templating_globset: None,
+            translations: BTreeMap::new(),
             output_dir: "public".to_string(),
+            preserve_dotfiles_in_output: false,
             link_checker: link_checker::LinkChecker::default(),
             slugify: slugify::Slugify::default(),
             search: search::Search::default(),
             markdown: markup::Markdown::default(),
-            extra: HashMap::new(),
-        };
-        conf.add_default_language();
-        conf
+            extra: BTreeMap::new(),
+            generate_sitemap: true,
+            generate_robots_txt: true,
+            exclude_paginated_pages_in_sitemap: ExcludePaginatedPagesInSitemap::None,
+        }
     }
 }
 
@@ -367,6 +496,74 @@ impl Default for Config {
 mod tests {
     use super::*;
     use utils::slugs::SlugifyStrategy;
+
+    #[test]
+    fn can_add_default_language_with_data_only_at_base_section() {
+        let title_base = Some("Base section title".to_string());
+        let description_base = Some("Base section description".to_string());
+
+        let mut config = Config::default();
+        config.title = title_base.clone();
+        config.description = description_base.clone();
+        config.add_default_language().unwrap();
+
+        let default_language_options =
+            config.languages.get(&config.default_language).unwrap().clone();
+        assert_eq!(default_language_options.title, title_base);
+        assert_eq!(default_language_options.description, description_base);
+    }
+
+    #[test]
+    fn can_add_default_language_with_data_at_base_and_language_section() {
+        let title_base = Some("Base section title".to_string());
+        let description_lang_section = Some("Language section description".to_string());
+
+        let mut config = Config::default();
+        config.title = title_base.clone();
+        config.languages.insert(
+            config.default_language.clone(),
+            languages::LanguageOptions {
+                title: None,
+                description: description_lang_section.clone(),
+                generate_feeds: true,
+                feed_filenames: config.feed_filenames.clone(),
+                taxonomies: config.taxonomies.clone(),
+                build_search_index: false,
+                search: search::Search::default(),
+                translations: config.translations.clone(),
+            },
+        );
+        config.add_default_language().unwrap();
+
+        let default_language_options =
+            config.languages.get(&config.default_language).unwrap().clone();
+        assert_eq!(default_language_options.title, title_base);
+        assert_eq!(default_language_options.description, description_lang_section);
+    }
+
+    #[test]
+    fn errors_when_same_field_present_at_base_and_language_section() {
+        let title_base = Some("Base section title".to_string());
+        let title_lang_section = Some("Language section title".to_string());
+
+        let mut config = Config::default();
+        config.title = title_base.clone();
+        config.languages.insert(
+            config.default_language.clone(),
+            languages::LanguageOptions {
+                title: title_lang_section.clone(),
+                description: None,
+                generate_feeds: true,
+                feed_filenames: config.feed_filenames.clone(),
+                taxonomies: config.taxonomies.clone(),
+                build_search_index: false,
+                search: search::Search::default(),
+                translations: config.translations.clone(),
+            },
+        );
+        let result = config.add_default_language();
+        assert!(result.is_err());
+    }
 
     #[test]
     fn can_import_valid_config() {
@@ -453,6 +650,13 @@ hello = "world"
         assert_eq!(config.make_permalink("atom.xml"), "http://vincent.is/atom.xml");
     }
 
+    // https://github.com/getzola/zola/issues/2676
+    #[test]
+    fn permalink_with_anchor() {
+        let config = Config { base_url: "http://vincent.is".to_string(), ..Default::default() };
+        assert_eq!(config.make_permalink("/about#me"), "http://vincent.is/about#me");
+    }
+
     #[test]
     fn can_merge_with_theme_data_and_preserve_config_value() {
         let config_str = r#"
@@ -533,20 +737,18 @@ title = "A title"
     }
 
     #[test]
-    fn missing_ignored_content_results_in_empty_vector_and_empty_globset() {
+    fn missing_ignored_content_results_in_empty_vector() {
         let config_str = r#"
 title = "My site"
 base_url = "example.com"
         "#;
 
         let config = Config::parse(config_str).unwrap();
-        let v = config.ignored_content;
-        assert_eq!(v.len(), 0);
-        assert!(config.ignored_content_globset.is_none());
+        assert_eq!(config.ignored_content.len(), 0);
     }
 
     #[test]
-    fn empty_ignored_content_results_in_empty_vector_and_empty_globset() {
+    fn empty_ignored_content_results_in_empty_vector() {
         let config_str = r#"
 title = "My site"
 base_url = "example.com"
@@ -555,7 +757,53 @@ ignored_content = []
 
         let config = Config::parse(config_str).unwrap();
         assert_eq!(config.ignored_content.len(), 0);
-        assert!(config.ignored_content_globset.is_none());
+    }
+
+    #[test]
+    fn missing_ignored_static_results_in_empty_vector() {
+        let config_str = r#"
+title = "My site"
+base_url = "example.com"
+        "#;
+
+        let config = Config::parse(config_str).unwrap();
+        assert_eq!(config.ignored_static.len(), 0);
+    }
+
+    #[test]
+    fn empty_ignored_static_results_in_empty_vector() {
+        let config_str = r#"
+title = "My site"
+base_url = "example.com"
+ignored_static = []
+        "#;
+
+        let config = Config::parse(config_str).unwrap();
+        assert_eq!(config.ignored_static.len(), 0);
+    }
+
+    #[test]
+    fn missing_link_checker_ignored_files_results_in_empty_vector() {
+        let config_str = r#"
+title = "My site"
+base_url = "example.com"
+        "#;
+
+        let config = Config::parse(config_str).unwrap();
+        assert_eq!(config.link_checker.ignored_files.len(), 0);
+    }
+
+    #[test]
+    fn empty_link_checker_ignored_files_results_in_empty_vector() {
+        let config_str = r#"
+title = "My site"
+base_url = "example.com"
+[link_checker]
+ignored_files = []
+        "#;
+
+        let config = Config::parse(config_str).unwrap();
+        assert_eq!(config.link_checker.ignored_files.len(), 0);
     }
 
     #[test]
@@ -563,21 +811,87 @@ ignored_content = []
         let config_str = r#"
 title = "My site"
 base_url = "example.com"
-ignored_content = ["*.{graphml,iso}", "*.py?"]
+ignored_content = ["*.{graphml,iso}", "*.py?", "**/{target,temp_folder}"]
         "#;
 
         let config = Config::parse(config_str).unwrap();
         let v = config.ignored_content;
-        assert_eq!(v, vec!["*.{graphml,iso}", "*.py?"]);
+        assert_eq!(v, vec!["*.{graphml,iso}", "*.py?", "**/{target,temp_folder}"]);
 
         let g = config.ignored_content_globset.unwrap();
-        assert_eq!(g.len(), 2);
+        assert_eq!(g.len(), 3);
         assert!(g.is_match("foo.graphml"));
+        assert!(g.is_match("foo/bar/foo.graphml"));
         assert!(g.is_match("foo.iso"));
         assert!(!g.is_match("foo.png"));
         assert!(g.is_match("foo.py2"));
         assert!(g.is_match("foo.py3"));
         assert!(!g.is_match("foo.py"));
+        assert!(g.is_match("foo/bar/target"));
+        assert!(g.is_match("foo/bar/baz/temp_folder"));
+        assert!(g.is_match("foo/bar/baz/temp_folder/target"));
+        assert!(g.is_match("temp_folder"));
+        assert!(g.is_match("my/isos/foo.iso"));
+        assert!(g.is_match("content/poetry/zen.py2"));
+    }
+
+    #[test]
+    fn non_empty_ignored_static_results_in_vector_of_patterns_and_configured_globset() {
+        let config_str = r#"
+title = "My site"
+base_url = "example.com"
+ignored_static = ["*.{graphml,iso}", "*.py?", "**/{target,temp_folder}"]
+        "#;
+
+        let config = Config::parse(config_str).unwrap();
+        let v = config.ignored_static;
+        assert_eq!(v, vec!["*.{graphml,iso}", "*.py?", "**/{target,temp_folder}"]);
+
+        let g = config.ignored_static_globset.unwrap();
+        assert_eq!(g.len(), 3);
+        assert!(g.is_match("foo.graphml"));
+        assert!(g.is_match("foo/bar/foo.graphml"));
+        assert!(g.is_match("foo.iso"));
+        assert!(!g.is_match("foo.png"));
+        assert!(g.is_match("foo.py2"));
+        assert!(g.is_match("foo.py3"));
+        assert!(!g.is_match("foo.py"));
+        assert!(g.is_match("foo/bar/target"));
+        assert!(g.is_match("foo/bar/baz/temp_folder"));
+        assert!(g.is_match("foo/bar/baz/temp_folder/target"));
+        assert!(g.is_match("temp_folder"));
+        assert!(g.is_match("my/isos/foo.iso"));
+        assert!(g.is_match("content/poetry/zen.py2"));
+    }
+
+    #[test]
+    fn non_empty_link_checker_ignored_pages_results_in_vector_of_patterns_and_configured_globset() {
+        let config_str = r#"
+title = "My site"
+base_url = "example.com"
+[link_checker]
+ignored_files = ["*.{graphml,iso}", "*.py?", "**/{target,temp_folder}"]
+        "#;
+
+        let config = Config::parse(config_str).unwrap();
+        let v = config.link_checker.ignored_files;
+        assert_eq!(v, vec!["*.{graphml,iso}", "*.py?", "**/{target,temp_folder}"]);
+
+        let g = config.link_checker.ignored_files_globset.unwrap();
+        assert_eq!(g.len(), 3);
+        assert!(g.is_match("foo.graphml"));
+        assert!(g.is_match("foo/bar/foo.graphml"));
+        assert!(g.is_match("foo.iso"));
+        assert!(!g.is_match("foo.png"));
+        assert!(g.is_match("foo.py2"));
+        assert!(g.is_match("foo.py3"));
+        assert!(!g.is_match("foo.py"));
+        assert!(g.is_match("foo/bar/target"));
+        assert!(g.is_match("foo/bar/baz/temp_folder"));
+        assert!(g.is_match("foo/bar/baz/temp_folder/target"));
+        assert!(g.is_match("temp_folder"));
+        assert!(g.is_match("my/isos/foo.iso"));
+        assert!(g.is_match("content/poetry/zen.py2"));
     }
 
     #[test]
@@ -634,8 +948,28 @@ anchors = "off"
 
         let config = Config::parse(config_str).unwrap();
         assert_eq!(config.slugify.paths, SlugifyStrategy::On);
+        assert_eq!(config.slugify.paths_keep_dates, false);
         assert_eq!(config.slugify.taxonomies, SlugifyStrategy::Safe);
         assert_eq!(config.slugify.anchors, SlugifyStrategy::Off);
+    }
+
+    #[test]
+    fn slugify_paths_keep_dates() {
+        let config_str = r#"
+title = "My site"
+base_url = "example.com"
+
+[slugify]
+paths_keep_dates = true
+taxonomies = "off"
+anchors = "safe"
+        "#;
+
+        let config = Config::parse(config_str).unwrap();
+        assert_eq!(config.slugify.paths, SlugifyStrategy::On);
+        assert_eq!(config.slugify.paths_keep_dates, true);
+        assert_eq!(config.slugify.taxonomies, SlugifyStrategy::Off);
+        assert_eq!(config.slugify.anchors, SlugifyStrategy::Safe);
     }
 
     #[test]
@@ -654,7 +988,7 @@ bar = "baz"
         "#;
         let theme = Theme::parse(theme_str).unwrap();
         // We expect an error here
-        assert!(!config.add_theme_extra(&theme).is_ok());
+        assert!(config.add_theme_extra(&theme).is_err());
     }
 
     #[test]
@@ -691,7 +1025,7 @@ highlight_theme = "asdf"
     "#;
 
         let config = Config::parse(config);
-        assert_eq!(config.is_err(), true);
+        assert!(config.is_err());
     }
 
     #[test]
@@ -705,6 +1039,108 @@ highlight_themes_css = [
     "#;
 
         let config = Config::parse(config);
-        assert_eq!(config.is_err(), true);
+        assert!(config.is_err());
     }
+
+    // https://github.com/getzola/zola/issues/1687
+    #[test]
+    fn regression_config_default_lang_data() {
+        let config = r#"
+base_url = "https://www.getzola.org/"
+title = "Zola"
+    "#;
+
+        let config = Config::parse(config).unwrap();
+        let serialised = config.serialize(&config.default_language);
+        assert_eq!(serialised.title, &config.title);
+    }
+
+    #[test]
+    fn sets_default_author_if_present() {
+        let config = r#"
+title = "My Site"
+base_url = "example.com"
+author = "person@example.com (Some Person)"
+"#;
+        let config = Config::parse(config).unwrap();
+        assert_eq!(config.author, Some("person@example.com (Some Person)".to_owned()))
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_backwards_incompatibility_for_feeds() {
+        let config = r#"
+base_url = "example.com"
+generate_feed = true
+feed_filename = "test.xml"
+        "#;
+
+        Config::parse(config).unwrap();
+    }
+
+    #[test]
+    fn parse_generate_sitemap_true() {
+        let config = r#"
+title = "My Site"
+base_url = "example.com"
+generate_sitemap = true
+"#;
+        let config = Config::parse(config).unwrap();
+        assert!(config.generate_sitemap);
+    }
+
+    #[test]
+    fn parse_generate_sitemap_false() {
+        let config = r#"
+title = "My Site"
+base_url = "example.com"
+generate_sitemap = false
+"#;
+        let config = Config::parse(config).unwrap();
+        assert!(!config.generate_sitemap);
+    }
+
+    #[test]
+    fn default_no_sitemap_true() {
+        let config = r#"
+title = "My Site"
+base_url = "example.com"
+"#;
+        let config = Config::parse(config).unwrap();
+        assert!(config.generate_sitemap);
+    }
+
+    #[test]
+    fn parse_generate_robots_true() {
+        let config = r#"
+title = "My Site"
+base_url = "example.com"
+generate_robots_txt = true
+"#;
+        let config = Config::parse(config).unwrap();
+        assert!(config.generate_robots_txt);
+    }
+
+    #[test]
+    fn parse_generate_robots_false() {
+        let config = r#"
+title = "My Site"
+base_url = "example.com"
+generate_robots_txt = false
+"#;
+        let config = Config::parse(config).unwrap();
+        assert!(!config.generate_robots_txt);
+    }
+
+    #[test]
+    fn default_no_robots_true() {
+        let config = r#"
+title = "My Site"
+base_url = "example.com"
+"#;
+        let config = Config::parse(config).unwrap();
+        assert!(config.generate_robots_txt);
+    }
+
+    // TODO: add a test for excluding paginated pages
 }

@@ -1,272 +1,111 @@
+mod elasticlunr;
+mod fuse;
+
+use content::Library;
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
+use time::OffsetDateTime;
 
-use elasticlunr::pipeline;
-use elasticlunr::pipeline::TokenizerFn;
-use elasticlunr::{Index, Language};
-use lazy_static::lazy_static;
+pub use elasticlunr::{ELASTICLUNR_JS, build_index as build_elasticlunr};
+pub use fuse::build_index as build_fuse;
 
-use config::{Config, Search};
-use errors::{bail, Result};
-use library::{Library, Section};
+static AMMONIA: LazyLock<ammonia::Builder<'static>> = LazyLock::new(|| {
+    let mut clean_content = HashSet::new();
+    clean_content.insert("script");
+    clean_content.insert("style");
+    clean_content.insert("pre");
+    let mut builder = ammonia::Builder::new();
+    builder
+        .tags(HashSet::new())
+        .tag_attributes(HashMap::new())
+        .generic_attributes(HashSet::new())
+        .link_rel(None)
+        .allowed_classes(HashMap::new())
+        .clean_content_tags(clean_content);
+    builder
+});
 
-pub const ELASTICLUNR_JS: &str = include_str!("elasticlunr.min.js");
-
-lazy_static! {
-    static ref AMMONIA: ammonia::Builder<'static> = {
-        let mut clean_content = HashSet::new();
-        clean_content.insert("script");
-        clean_content.insert("style");
-        let mut builder = ammonia::Builder::new();
-        builder
-            .tags(HashSet::new())
-            .tag_attributes(HashMap::new())
-            .generic_attributes(HashSet::new())
-            .link_rel(None)
-            .allowed_classes(HashMap::new())
-            .clean_content_tags(clean_content);
-        builder
-    };
+/// Uses ammonia to clean the body, and truncates it to `truncate_content_length`.
+/// Removes extra whitespace and blank lines.
+pub fn clean_and_truncate_body(truncate_content_length: Option<usize>, body: &str) -> String {
+    let mut clean = AMMONIA
+        .clean(body)
+        .to_string()
+        .lines()
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if let Some(new_len) = truncate_content_length {
+        clean.truncate(clean.char_indices().nth(new_len).map(|(i, _)| i).unwrap_or(clean.len()))
+    }
+    clean
 }
 
-fn build_fields(search_config: &Search) -> Vec<String> {
-    let mut fields = vec![];
-    if search_config.include_title {
-        fields.push("title".to_owned());
-    }
-
-    if search_config.include_description {
-        fields.push("description".to_owned());
-    }
-
-    if search_config.include_path {
-        fields.push("path".to_owned());
-    }
-
-    if search_config.include_content {
-        fields.push("body".to_owned());
-    }
-
-    fields
+/// A single page or section that should be included in the search index
+/// for a specific language.
+struct IndexItem<'a> {
+    url: &'a str,
+    title: &'a Option<String>,
+    description: &'a Option<String>,
+    content: &'a String,
+    datetime: &'a Option<OffsetDateTime>,
+    path: &'a String,
 }
 
-fn path_tokenizer(text: &str) -> Vec<String> {
-    text.split(|c: char| c.is_whitespace() || c == '-' || c == '/')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.trim().to_lowercase())
-        .collect()
-}
-
-fn build_tokenizers(search_config: &Search, language: Language) -> Vec<TokenizerFn> {
-    let text_tokenizer = match language {
-        #[cfg(feature = "indexing-zh")]
-        Language::Chinese => pipeline::tokenize_chinese,
-        #[cfg(feature = "indexing-ja")]
-        Language::Japanese => pipeline::tokenize_japanese,
-        _ => pipeline::tokenize,
-    };
-    let mut tokenizers: Vec<TokenizerFn> = vec![];
-    if search_config.include_title {
-        tokenizers.push(text_tokenizer);
-    }
-
-    if search_config.include_description {
-        tokenizers.push(text_tokenizer);
-    }
-
-    if search_config.include_path {
-        tokenizers.push(path_tokenizer);
-    }
-
-    if search_config.include_content {
-        tokenizers.push(text_tokenizer);
-    }
-
-    tokenizers
-}
-
-fn fill_index(
-    search_config: &Search,
-    title: &Option<String>,
-    description: &Option<String>,
-    path: &str,
-    content: &str,
-) -> Vec<String> {
-    let mut row = vec![];
-
-    if search_config.include_title {
-        row.push(title.clone().unwrap_or_default());
-    }
-
-    if search_config.include_description {
-        row.push(description.clone().unwrap_or_default());
-    }
-
-    if search_config.include_path {
-        row.push(path.to_string());
-    }
-
-    if search_config.include_content {
-        let body = AMMONIA.clean(content).to_string();
-        if let Some(truncate_len) = search_config.truncate_content_length {
-            // Not great for unicode
-            // TODO: fix it like the truncate in Tera
-            match body.char_indices().nth(truncate_len) {
-                None => row.push(body),
-                Some((idx, _)) => row.push((&body[..idx]).to_string()),
-            };
-        } else {
-            row.push(body);
-        };
-    }
-
-    row
-}
-
-/// Returns the generated JSON index with all the documents of the site added using
-/// the language given
-/// Errors if the language given is not available in Elasticlunr
-/// TODO: is making `in_search_index` apply to subsections of a `false` section useful?
-pub fn build_index(lang: &str, library: &Library, config: &Config) -> Result<String> {
-    let language = match Language::from_code(lang) {
-        Some(l) => l,
-        None => {
-            bail!("Tried to build search index for language {} which is not supported", lang);
+/// Collect all pages and sections which should be included in the search index
+/// of a given language.
+fn collect_index_items<'a>(lang: &str, library: &'a Library) -> Vec<IndexItem<'a>> {
+    let mut items: Vec<IndexItem> = Vec::new();
+    for (_, section) in &library.sections {
+        if section.lang != lang {
+            continue;
         }
-    };
-    let language_options = &config.languages[lang];
-    let mut index = Index::with_language(language, &build_fields(&language_options.search));
-
-    let tokenizers = build_tokenizers(&language_options.search, language);
-
-    for section in library.sections_values() {
-        if section.lang == lang {
-            add_section_to_index(
-                &mut index,
-                section,
-                library,
-                &language_options.search,
-                tokenizers.clone(),
-            );
-        }
-    }
-
-    Ok(index.to_json())
-}
-
-fn add_section_to_index(
-    index: &mut Index,
-    section: &Section,
-    library: &Library,
-    search_config: &Search,
-    tokenizers: Vec<TokenizerFn>,
-) {
-    if !section.meta.in_search_index {
-        return;
-    }
-
-    // Don't index redirecting sections
-    if section.meta.redirect_to.is_none() {
-        index.add_doc_with_tokenizers(
-            &section.permalink,
-            &fill_index(
-                search_config,
-                &section.meta.title,
-                &section.meta.description,
-                &section.path,
-                &section.content,
-            ),
-            tokenizers.clone(),
-        );
-    }
-
-    for key in &section.pages {
-        let page = library.get_page_by_key(*key);
-        if !page.meta.in_search_index {
+        if !section.meta.in_search_index {
             continue;
         }
 
-        index.add_doc_with_tokenizers(
-            &page.permalink,
-            &fill_index(
-                search_config,
-                &page.meta.title,
-                &page.meta.description,
-                &page.path,
-                &page.content,
-            ),
-            tokenizers.clone(),
-        );
+        if section.meta.redirect_to.is_none() && !section.hidden {
+            items.push(IndexItem {
+                url: &section.permalink,
+                title: &section.meta.title,
+                datetime: &None,
+                description: &section.meta.description,
+                content: &section.content,
+                path: &section.path,
+            });
+        }
+
+        for page in &section.pages {
+            let page = &library.pages[page];
+            if page.meta.in_search_index {
+                items.push(IndexItem {
+                    url: &page.permalink,
+                    title: &page.meta.title,
+                    datetime: &page.meta.datetime,
+                    description: &page.meta.description,
+                    content: &page.content,
+                    path: &page.path,
+                })
+            }
+        }
     }
+    items
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    use config::Config;
-
-    #[test]
-    fn can_build_fields() {
-        let mut config = Config::default();
-        let fields = build_fields(&config.search);
-        assert_eq!(fields, vec!["title", "body"]);
-
-        config.search.include_content = false;
-        config.search.include_description = true;
-        let fields = build_fields(&config.search);
-        assert_eq!(fields, vec!["title", "description"]);
-
-        config.search.include_content = true;
-        let fields = build_fields(&config.search);
-        assert_eq!(fields, vec!["title", "description", "body"]);
-
-        config.search.include_title = false;
-        let fields = build_fields(&config.search);
-        assert_eq!(fields, vec!["description", "body"]);
-    }
-
-    #[test]
-    fn can_fill_index_default() {
-        let config = Config::default();
-        let title = Some("A title".to_string());
-        let description = Some("A description".to_string());
-        let path = "/a/page/".to_string();
-        let content = "Some content".to_string();
-
-        let res = fill_index(&config.search, &title, &description, &path, &content);
-        assert_eq!(res.len(), 2);
-        assert_eq!(res[0], title.unwrap());
-        assert_eq!(res[1], content);
-    }
-
-    #[test]
-    fn can_fill_index_description() {
-        let mut config = Config::default();
-        config.search.include_description = true;
-        let title = Some("A title".to_string());
-        let description = Some("A description".to_string());
-        let path = "/a/page/".to_string();
-        let content = "Some content".to_string();
-
-        let res = fill_index(&config.search, &title, &description, &path, &content);
-        assert_eq!(res.len(), 3);
-        assert_eq!(res[0], title.unwrap());
-        assert_eq!(res[1], description.unwrap());
-        assert_eq!(res[2], content);
-    }
-
-    #[test]
-    fn can_fill_index_truncated_content() {
-        let mut config = Config::default();
-        config.search.truncate_content_length = Some(5);
-        let title = Some("A title".to_string());
-        let description = Some("A description".to_string());
-        let path = "/a/page/".to_string();
-        let content = "Some content".to_string();
-
-        let res = fill_index(&config.search, &title, &description, &path, &content);
-        assert_eq!(res.len(), 2);
-        assert_eq!(res[0], title.unwrap());
-        assert_eq!(res[1], content[..5]);
-    }
+#[test]
+fn clean_and_truncate_body_test() {
+    assert_eq!(clean_and_truncate_body(None, "hello world"), "hello world");
+    assert_eq!(
+        clean_and_truncate_body(None, "hello <script>alert('xss')</script> world"),
+        "hello world"
+    );
+    assert_eq!(clean_and_truncate_body(Some(100), "hello"), "hello");
+    assert_eq!(clean_and_truncate_body(Some(2), "hello"), "he");
+    assert_eq!(clean_and_truncate_body(Some(6), "hello \u{202E} world"), "hello ");
+    assert_eq!(clean_and_truncate_body(Some(7), "hello \u{202E} world"), "hello \u{202e}");
+    assert_eq!(clean_and_truncate_body(None, "hello        world"), "hello world");
+    assert_eq!(clean_and_truncate_body(None, "hello    \n    world"), "hello\nworld");
+    assert_eq!(clean_and_truncate_body(None, "\n hello  \n \n \n   world\n   "), "hello\nworld");
 }

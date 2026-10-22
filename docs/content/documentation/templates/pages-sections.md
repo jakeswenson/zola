@@ -22,6 +22,8 @@ date: String?;
 updated: String?;
 slug: String;
 path: String;
+authors: Array<String>;
+aliases: Array<String>;
 draft: Bool;
 // the path, split on '/'
 components: Array<String>;
@@ -30,18 +32,14 @@ summary: String?;
 taxonomies: HashMap<String, Array<String>>;
 extra: HashMap<String, Any>;
 toc: Array<Header>,
-// Naive word count, will not work for languages without whitespace
+// Word count via unicode_words; for `zh` and `ja` this is a character count
 word_count: Number;
-// Based on https://help.medium.com/hc/en-us/articles/214991667-Read-time
+// Estimated reading time in minutes, using per-language silent-reading rates
 reading_time: Number;
-// `earlier` and `later` are only populated if the section variable `sort_by` is set to `date`
-// and only set when rendering the page itself
-earlier: Page?;
-later: Page?;
-// `heavier` and `lighter` are only populated if the section variable `sort_by` is set to `weight`
-// and only set when rendering the page itself
-heavier: Page?;
-lighter: Page?;
+// later / lighter
+lower: Page?;
+// earlier / heavier
+higher: Page?;
 // Year/month/day is only set if the page has a date and month/day are 1-indexed
 year: Number?;
 month: Number?;
@@ -50,14 +48,21 @@ day: Number?;
 assets: Array<String>;
 // The relative paths of the parent sections until the index one, for use with the `get_section` Tera function
 // The first item is the index section and the last one is the parent section
-// This is filled after rendering a page content so it will be empty in shortcodes
+// This is filled after rendering a page content so it will be empty when rendering markdown content
 ancestors: Array<String>;
 // The relative path from the `content` directory to the markdown file
 relative_path: String;
+// The relative path from the `content` directory to the directory of a colocated index.md markdown file
+// Null if the file is not colocated.
+colocated_path: String?;
+// Whether this page is included in feeds. Default to true
+include_in_feeds: Bool;
 // The language for the page if there is one. Default to the config `default_language`
 lang: String;
 // Information about all the available languages for that content, including the current page
 translations: Array<TranslatedContent>;
+// All the pages/sections linking this page: their permalink and a title if there is one
+backlinks: Array<{permalink: String, title: String?}>;
 ```
 
 ## Section variables
@@ -79,7 +84,7 @@ path: String;
 components: Array<String>;
 permalink: String;
 extra: HashMap<String, Any>;
-// Pages directly in this section. By default, the pages are not sorted. Please set the "sorted_by"
+// Pages directly in this section. By default, the pages are not sorted. Please set the "sort_by"
 // variable in the _index.md file of the corresponding section to "date" or "weight" for sorting by
 // date and weight, respectively.
 pages: Array<Page>;
@@ -88,15 +93,15 @@ pages: Array<Page>;
 // the actual section object if you need it
 subsections: Array<String>;
 toc: Array<Header>,
-// Unicode word count
+// Word count via unicode_words; for `zh` and `ja` this is a character count
 word_count: Number;
-// Based on https://help.medium.com/hc/en-us/articles/214991667-Read-time
+// Estimated reading time in minutes, using per-language silent-reading rates
 reading_time: Number;
 // Paths of colocated assets, relative to the content directory
 assets: Array<String>;
 // The relative paths of the parent sections until the index one, for use with the `get_section` Tera function
 // The first item is the index section and the last one is the parent section
-// This is filled after rendering a page content so it will be empty in shortcodes
+// This is filled after rendering a page content so it will be empty when rendering markdown content
 ancestors: Array<String>;
 // The relative path from the `content` directory to the markdown file
 relative_path: String;
@@ -104,7 +109,21 @@ relative_path: String;
 lang: String;
 // Information about all the available languages for that content
 translations: Array<TranslatedContent>;
+// All the pages/sections linking this page: their permalink and a title if there is one
+backlinks: Array<{permalink: String, title: String?}>;
+// Whether this section generates feeds or not. Taken from the front-matter if set
+generate_feeds: bool;
+// Whether this section is transparent. Taken from the front-matter if set
+transparent: bool;
+// How many items per pager (if defined)
+paginate_by: Number?;
+// If items order is reversed in the pagination (defaults to false)
+paginate_reversed: bool;
 ```
+
+Information about pagination is useful when using the `get_section` Tera function for which the `paginator` is not available.
+
+See [pagination template documentation](@/documentation/templates/pagination.md) for more information on the `paginator` variable.
 
 ## Table of contents
 

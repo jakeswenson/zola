@@ -5,9 +5,16 @@ weight = 5
 
 ## Zola at a Glance
 
-Zola is a static site generator (SSG), similar to [Hugo](https://gohugo.io/), [Pelican](https://blog.getpelican.com/), and [Jekyll](https://jekyllrb.com/) (for a comprehensive list of SSGs, please see [Jamstack](https://jamstack.org/generators)). It is written in [Rust](https://www.rust-lang.org/) and uses the [Tera](https://tera.netlify.com/) template engine, which is similar to [Jinja2](https://jinja.palletsprojects.com/en/2.10.x/), [Django templates](https://docs.djangoproject.com/en/2.2/topics/templates/), [Liquid](https://shopify.github.io/liquid/), and [Twig](https://twig.symfony.com/). Content is written in [CommonMark](https://commonmark.org/), a strongly defined, highly compatible specification of [Markdown](https://www.markdownguide.org/).
+Zola is a static site generator (SSG), similar to [Hugo](https://gohugo.io/), [Pelican](https://blog.getpelican.com/), and [Jekyll](https://jekyllrb.com/) (for a comprehensive list of SSGs, please see [Jamstack](https://jamstack.org/generators)). 
+It is written in [Rust](https://www.rust-lang.org/) and uses the [Tera](https://keats.github.io/tera/) template engine, which is similar to [Jinja2](https://jinja.palletsprojects.com/en/2.10.x/), [Django templates](https://docs.djangoproject.com/en/2.2/topics/templates/), [Liquid](https://shopify.github.io/liquid/), and [Twig](https://twig.symfony.com/).
 
-SSGs use dynamic templates to transform content into static HTML pages. Static sites are thus very fast and require no databases, making them easy to host. A comparison between static and dynamic sites, such as WordPress, Drupal, and Django, can be found [here](https://dev.to/ashenmaster/static-vs-dynamic-sites-61f).
+Content is written in [CommonMark](https://commonmark.org/), a strongly defined, highly compatible specification of [Markdown](https://www.markdownguide.org/). Zola uses [pulldown-cmark](https://github.com/raphlinus/pulldown-cmark#pulldown-cmark) to parse markdown files. 
+The goal of this library is 100% compliance with the CommonMark spec. It adds a few additional features such as parsing footnotes, Github flavored tables, Github flavored task lists and strikethrough.
+
+SSGs use dynamic templates to transform content into static HTML pages. Static sites are thus very fast and require no databases, making them easy to host. 
+A comparison between static and dynamic sites, such as WordPress, Drupal, and Django, can be found [here](https://dev.to/ashenmaster/static-vs-dynamic-sites-61f).
+
+If you're updating from a previous version, see the [CHANGELOG](https://github.com/getzola/zola/blob/master/CHANGELOG.md) for all the changes.
 
 To get a taste of Zola, please see the quick overview below.
 
@@ -17,11 +24,11 @@ Unlike some SSGs, Zola makes no assumptions regarding the structure of your site
 
 ### Initialize Site
 
-> This overview is based on Zola 0.9.
+> This overview is based on Zola 0.19.1.
 
 Please see the detailed [installation instructions for your platform](@/documentation/getting-started/installation.md). With Zola installed, let's initialize our site:
 
-```bash
+```
 $ zola init myblog
 ```
 
@@ -36,8 +43,8 @@ You will be asked a few questions.
 
  For our blog, let's accept the default values (i.e., press Enter for each question). We now have a `myblog` directory with the following structure:
 
-```bash
-├── config.toml
+```
+├── zola.toml
 ├── content
 ├── sass
 ├── static
@@ -48,7 +55,7 @@ You will be asked a few questions.
 For reference, by the **end** of this overview, our `myblog` directory will have the following structure:
 
 ```
-├── config.toml
+├── zola.toml
 ├── content/
 │   └── blog/
 │       ├── _index.md
@@ -64,23 +71,18 @@ For reference, by the **end** of this overview, our `myblog` directory will have
 └── themes/
 ```
 
-Let's start the Zola development server with:
+Change directory into the newly-created `myblog` directory.
 
-```bash
-$ zola serve
-Building site...
--> Creating 0 pages (0 orphan), 0 sections, and processing 0 images
-```
+### Templates
 
-> This command must be run in the base Zola directory, which contains `config.toml`.
+We'll first create some templates to describe the structure of our site.
 
-If you point your web browser to <http://127.0.0.1:1111>, you should see a "Welcome to Zola" message.
+#### Home Page Template
 
-### Home Page
+Let's make a template for a home page. Create `templates/base.html` with the following content. This step will make more sense as we move through this overview.
 
-Let's make a home page. To do this, let's first create a `base.html` file inside the `templates` directory. This step will make more sense as we move through this overview.
-
-```html
+```jinja
+{% raw -%}
 <!DOCTYPE html>
 <html lang="en">
 
@@ -92,17 +94,19 @@ Let's make a home page. To do this, let's first create a `base.html` file inside
 <body>
   <section class="section">
     <div class="container">
-      {% block content %} {% endblock %}
+      {% block content %} {% endblock content %}
     </div>
   </section>
 </body>
 
 </html>
+{%- endraw %}
 ```  
 
-Now, let's create an `index.html` file inside the `templates` directory.
+Now, let's create `templates/index.html` with the following content.
 
-```html
+```jinja
+{% raw -%}
 {% extends "base.html" %}
 
 {% block content %}
@@ -110,21 +114,87 @@ Now, let's create an `index.html` file inside the `templates` directory.
   This is my blog made with Zola.
 </h1>
 {% endblock content %}
+{%- endraw %}
 ```  
 
-This tells Zola that `index.html` extends our `base.html` file and replaces the block called "content" with the text between the `{% block content %}` and `{% endblock content %}` tags.
+This tells Zola that `index.html` extends our `base.html` file and replaces the block called "content" with the text between the `{% raw %}{% block content %}{% endraw %}` and `{% raw %}{% endblock content %}{% endraw %}` tags.
 
-### Content Directory
+#### Blog Template
 
-Now let's add some content. We'll start by making a `blog` subdirectory in the `content` directory and creating an `_index.md` file inside it. This file tells Zola that `blog` is a [section](@/documentation/content/section.md), which is how content is categorized in Zola.
+To create a template for a page that lists all blog posts, create `templates/blog.html` with the following content.
 
-```bash
-├── content
-│   └── blog
-│       └── _index.md
+```jinja
+{% raw -%}
+{% extends "base.html" %}
+
+{% block content %}
+<h1 class="title">
+  {{ section.title }}
+</h1>
+<ul>
+  <!-- If you are using pagination, section.pages will be empty.
+       You need to use the paginator object -->  
+  {% for page in section.pages %}
+  <li><a href="{{ page.permalink | safe }}">{{ page.title }}</a></li>
+  {% endfor %}
+</ul>
+{% endblock content %}
+{%- endraw %}
 ```
 
-In the `_index.md` file, we'll set the following variables in [TOML](https://github.com/toml-lang/toml) format:
+As done by `index.html`, `blog.html` extends `base.html`, but in this template we want to list the blog posts. Here we also see expressions such as `{% raw %}{{ section.[...] }}{% endraw %}` and `{% raw %}{{ page.[...] }}{% endraw %}` which will be replaced with values from our [content](#content) when zola combines content with this template to render a page. 
+In the list below the header, we loop through all the pages in our section (`blog` directory; more on this when we create content) and output each page title and URL using `{% raw %}{{ page.title }}{% endraw %}` and `{% raw %}{{ page.permalink | safe }}{% endraw %}`, respectively. 
+We use the `| safe` filter because the permalink doesn't need to be HTML escaped (escaping would cause `/` to render as `&#x2F;`).
+
+#### Blog Post Template
+
+We have templates describing our home page and a page that lists all blog posts. Let's now create a template for an individual blog post. Create `templates/blog-page.html` with the following content.
+
+```jinja
+{% raw -%}
+{% extends "base.html" %}
+
+{% block content %}
+<h1 class="title">
+  {{ page.title }}
+</h1>
+<p class="subtitle"><strong>{{ page.date }}</strong></p>
+{{ page.content | safe }}
+{% endblock content %}
+{%- endraw %}
+```
+
+> Note the `| safe` filter for `{% raw %}{{ page.content }}{% endraw %}`.
+
+### Zola Live Reloading
+
+Now that we've outlined our site's structure, let's start the Zola development server in the `myblog` directory.
+
+```
+$ zola serve
+Building site...
+Checking all internal links with anchors.
+> Successfully checked 0 internal link(s) with anchors.
+-> Creating 0 pages (0 orphan) and 0 sections
+Done in 13ms.
+
+Web server is available at http://127.0.0.1:1111
+
+Listening for changes in .../myblog/{zola.toml,content,sass,static,templates}
+Press Ctrl+C to stop
+```
+
+If you point your web browser to <http://127.0.0.1:1111>, you will see a message saying, "This is my blog made with Zola."
+
+If you go to <http://127.0.0.1:1111/blog/>, you will currently get a 404 which we will fix next.
+
+### Content
+
+We'll now create some content that Zola will use to generate site pages based on our templates.
+
+#### Sections
+
+We'll start by creating `content/blog/_index.md`. This file tells Zola that `blog` is a [section](@/documentation/content/section.md), which is how content is categorized in Zola. In the `_index.md` file, we'll set the following variables in [TOML](https://github.com/toml-lang/toml) format:
 
 ```md
 +++
@@ -138,37 +208,18 @@ page_template = "blog-page.html"
 > Note that although no variables are mandatory, the opening and closing `+++` are required.
 
 * *sort_by = "date"* tells Zola to use the date to order our section pages (more on pages below). 
-* *template = "blog.html"* tells Zola to use `blog.html` in the `templates` directory as the template for listing the Markdown files in this section. 
-* *page_template = "blog-page.html"* tells Zola to use `blog-page.html` in the `templates` directory as the template for individual Markdown files. 
+* *template = "blog.html"* tells Zola to use `templates/blog.html` as the template for listing the Markdown files in this section. 
+* *page_template = "blog-page.html"* tells Zola to use `templates/blog-page.html` as the template for individual Markdown files. 
 
-For a full list of section variables, please see the [section](@/documentation/content/section.md) documentation. We will use *title = "List of blog posts"* in a template (see below).
+For a full list of section variables, please see the [section](@/documentation/content/section.md) documentation.
 
-### Templates
+The value of our `title` variable here is available to templates such as `blog.html` as `{% raw %}{{ section.title }}{% endraw %}`.
 
-Let's now create some more templates. In the `templates` directory, create a `blog.html` file with the following contents:
+If you now go to <http://127.0.0.1:1111/blog/>, you will see an empty list of posts.
 
-```html
-{% extends "base.html" %}
+#### Markdown
 
-{% block content %}
-<h1 class="title">
-  {{ section.title }}
-</h1>
-<ul>
-  {% for page in section.pages %}
-  <li><a href="{{ page.permalink | safe }}">{{ page.title }}</a></li>
-  {% endfor %}
-</ul>
-{% endblock content %}
-```
-
-As done by `index.html`, `blog.html` extends `base.html`, but this time we want to list the blog posts. The *title* we set in the `_index.md` file above is available to us as `{{ section.title }}`. In the list below the title, we loop through all the pages in our section (`blog` directory) and output the page title and URL using `{{ page.title }}` and `{{ page.permalink | safe }}`, respectively. We use the `| safe` filter because the permalink doesn't need to be HTML escaped (escaping would cause `/` to render as `&#x2F;`).
-
-If you go to <http://127.0.0.1:1111/blog/>, you will see the section page for `blog`. The list is empty because we don't have any blog posts. Let's fix that now.
-
-### Markdown Content
-
-In the `blog` directory, create a file called `first.md` with the following contents:
+We'll now create some blog posts. Create `content/blog/first.md` with the following content.
 
 ```md
 +++
@@ -179,25 +230,9 @@ date = 2019-11-27
 This is my first blog post.
 ```
 
-The *title* and *date* will be available to us in the `blog-page.html` template as `{{ page.title }}` and `{{ page.date }}`, respectively. All text below the closing `+++` will be available to us as `{{ page.content }}`.
+The *title* and *date* will be available to us in the `blog-page.html` template as `{% raw %}{{ page.title }}{% endraw %}` and `{% raw %}{{ page.date }}{% endraw %}`, respectively. All text below the closing `+++` will be available to templates as `{% raw %}{{ page.content }}{% endraw %}`.
 
-We now need to make the `blog-page.html` template. In the `templates` directory, create this file with the contents:
-
-```html
-{% extends "base.html" %}
-
-{% block content %}
-<h1 class="title">
-  {{ page.title }}
-</h1>
-<p class="subtitle"><strong>{{ page.date }}</strong></p>
-{{ page.content | safe }}
-{% endblock content %}
-```
-
-> Note the `| safe` filter for `{{ page.content }}`.
-
-This should start to look familiar. If you now go back to our blog list page at <http://127.0.0.1:1111/blog/>, you should see our lonely post. Let's add another. In the `content/blog` directory, let's create the file `second.md` with the contents:
+If you now go back to our blog list page at <http://127.0.0.1:1111/blog/>, you should see our lonely post. Let's add another. Create `content/blog/second.md` with the contents:
 
 ```md
 +++
@@ -208,19 +243,21 @@ date = 2019-11-28
 This is my second blog post.
 ```
 
-Back at <http://127.0.0.1:1111/blog/>, our second post shows up on top of the list because it's newer than the first post and we had set *sort_by = "date"* in our `_index.md` file. As a final step, let's modify our home page to link to our blog posts.
+Back at <http://127.0.0.1:1111/blog/>, our second post shows up on top of the list because it's newer than the first post and we had set *sort_by = "date"* in our `_index.md` file.
 
-The `index.html` file inside the `templates` directory should be:
+As a final step, let's modify `templates/index.html` (our home page) to link to our list of blog posts:
 
-```html
+```jinja
+{% raw -%}
 {% extends "base.html" %}
 
 {% block content %}
 <h1 class="title">
   This is my blog made with Zola.
 </h1>
-<p>Click <a href="/blog/">here</a> to see my posts.</p>
+<p><a href="{{ get_url(path='@/blog/_index.md') }}">Posts</a>.</p>
 {% endblock content %}
+{%- endraw %}
 ```  
 
 This has been a quick overview of Zola. You can now dive into the rest of the documentation.

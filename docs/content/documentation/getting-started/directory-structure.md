@@ -8,7 +8,7 @@ After running `zola init`, you should see the following structure in your direct
 
 ```bash
 .
-├── config.toml
+├── zola.toml
 ├── content
 ├── sass
 ├── static
@@ -18,9 +18,11 @@ After running `zola init`, you should see the following structure in your direct
 5 directories, 1 file
 ```
 
-Here's a high-level overview of each of these directories and `config.toml`.
+You might also see a `public` directory if you are running the default `zola build/serve` commands which contains some output for the site: the full site for `zola build` and only the static assets for `zola serve`. This folder will be deleted/created automatically by `zola serve`.
 
-## `config.toml`
+Here's a high-level overview of each of these directories and `zola.toml`.
+
+## `zola.toml`
 A mandatory Zola configuration file in TOML format.
 This file is explained in detail in the [configuration documentation](@/documentation/getting-started/configuration.md).
 
@@ -42,7 +44,7 @@ If your static files are large, you can configure Zola to [hard link](https://en
 instead of copying them by setting `hard_link_static = true` in the config file.
 
 ## `templates`
-Contains all the [Tera](https://tera.netlify.com) templates that will be used to render your site.
+Contains all the [Tera](https://keats.github.io/tera) templates that will be used to render your site.
 Have a look at the [templates documentation](@/documentation/templates/_index.md) to learn more about default templates
 and available variables.
 

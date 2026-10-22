@@ -3,33 +3,41 @@
 title = "dose"
 description = "a small blog theme"
 template = "theme.html"
-date = 2021-12-02T23:22:24+01:00
+date = 2026-03-21T12:17:36+01:00
+
+[taxonomies]
+theme-tags = []
 
 [extra]
-created = 2021-12-02T23:22:24+01:00
-updated = 2021-12-02T23:22:24+01:00
+created = 2026-03-21T12:17:36+01:00
+updated = 2026-03-21T12:17:36+01:00
 repository = "https://github.com/oltdaniel/dose.git"
-homepage = "https://github.com/oltd/dose"
-minimum_version = "0.13.0"
+homepage = "https://github.com/oltdaniel/dose"
+minimum_version = "0.14.0"
 license = "MIT"
-demo = "https://oltd.github.io/dose"
+demo = "https://oltdaniel.github.io/dose"
 
 [extra.author]
-name = "oltd"
-homepage = "https://oltd.dev"
+name = "oltdaniel"
+homepage = "https://oltdaniel.eu"
 +++        
 
 # dose
 
 ![](screenshot.png?raw=true)
 
+> [!IMPORTANT]
+> This project is in maintenance mode and will be archived. Only critical updates will be applied.
+
 ## Installation
 
-First download this theme to your `themes` directory:
+First install the theme into the `themes` directory with one of these options:
 
 ```bash
-cd themes
-git clone https://github.com/oltd/dose.git
+# If you work with git: 
+git submodule add https://github.com/oltdaniel/dose.git themes/dose
+# or just do a download:
+git clone https://github.com/oltdaniel/dose.git themes/dose
 ```
 
 and then enable it in your `config.toml`:
@@ -38,11 +46,11 @@ and then enable it in your `config.toml`:
 theme = "dose"
 ```
 
-The following taxonomies are enabled:
+You can enable the following taxonomies:
 
 ```toml
 taxonomies = [
-    {name = "tags"},
+    { name = "tags", feed = true },
 ]
 ```
 
@@ -51,13 +59,15 @@ And the theme uses the following extras:
 ```toml
 [extra]
 social_media = [
-    {name = "GitHub", url = "https://github.com/oltd"},
-    {name = "Twitter", url = "https://twitter.com/@oltd_maker"},
+    { name = "GitHub", url = "https://github.com/oltdaniel" },
+    { name = "Twitter", url = "https://twitter.com/@twitter" },
+    { name = "Mastodon", url = "https://mastodon.social/@Mastodon", rel = "me" }
 ]
+default_theme = "dark" # or "light"
 ```
 
 The description of yourself with your image, you can modify by using a template. Just create a new
-file `myblog/parts/me.html`:
+file `myblog/templates/parts/me.html`:
 
 ```html
 <img src="https://via.placeholder.com/50" height="50px" width="50px">
@@ -82,7 +92,7 @@ This theme uses no special font, just the browsers default monospace font. Yes, 
 
 #### Darkmode
 
-This theme supports dark and light mode. Currently this will be only switched based on the users preffered system theme. But a manual switch will follow in the future in the footer (see the todo).
+This theme supports dark and light mode. Currently this will be only switched based on the users preferred system theme. But a manual switch will follow in the future in the footer (see the todo).
 
 | light | dark |
 |-|-|
@@ -90,19 +100,44 @@ This theme supports dark and light mode. Currently this will be only switched ba
 
 #### Size
 
-We need about `2kB` extra stuff aside from images and raw html. This is divided up to `1.7kB CSS` and `~300B JS`.
+The JavaScript has been moved into the page itself to allow minification. Together this results in the following sizes for the `index.html`:
+- `~ 3kB` JavaScript
+- `~ 3kB` CSS
+- `~ 17kB` Profile Image
+- `~5kB - ~3kB = ~2kB` HTML
+
+Which results in a total loading size of `3kB + 3kB + 17kB + 2kB = 25kB`.
 
 #### Syntax Highlighting
 
-As I didn't want to invest any time in creating an own syntax color schema for this theme, I suggest to use `visual-studio-dark`, which is the same one used in the demo page.
+As I didn't want to invest any time in creating an own syntax color schema for this theme, I suggest to use some of thge default themes. For the demo page I used:
 
-### TODO
+```toml
+[markdown.highlighting]
+light_theme = "github-light"
+dark_theme = "github-dark"
+```
 
-- [ ] introduce sass variables for colors
-- [ ] dark/light switch with javascript and store in browser session
+#### Customization
 
-## License
+You can create your own version of this theme, by simply changing the sass variables in `sass/style.scss` to match your taste.
 
-![GitHub](https://img.shields.io/github/license/oltd/dose)
+```scss
+/**
+ * Variables
+ */
+$base-background: white;
+$text-color: black;
+$article-tag: green;
+$lang-tag: red;
+$link-color: blue;
+$target-color: yellow;
+$separator-decoration: "//////";
+```
 
+## License & Contributors
+
+![GitHub](https://img.shields.io/github/license/oltdaniel/dose)
+
+This project was created by [Daniel Oltmanns](https://github.com/oltdaniel) and has been improved by these [contributors](https://github.com/oltdaniel/dose/graphs/contributors).
         

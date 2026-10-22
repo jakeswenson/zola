@@ -10,9 +10,11 @@
     </div>
     <!-- Next line is meant to test inner html chars (see https://github.com/getzola/zola/issues/1152) -->
     <p> <<< </p>
+
+    {{ section.content | safe }}
 {% endblock content %}
 
 {% block script %}
     <script src="{{ get_url(path="scripts/hello.js") | safe }}"
-            integrity="sha384-{{ get_file_hash(path="scripts/hello.js", base64=true) | safe }}"></script>
+            integrity="sha384-{{ get_hash(path="scripts/hello.js", base64=true) | safe }}"></script>
 {% endblock script %}

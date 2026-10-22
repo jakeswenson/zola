@@ -36,6 +36,43 @@ one page (`something.md`), the `landing` section has no pages and the `blog` sec
 
 Sections can be nested indefinitely.
 
+## Templating your content
+
+Every page/section of your site is also a [Tera](https://keats.github.io/tera/) template.
+This means you can use any features of Tera in your content (even functions like `resize_image`), not just the shortcode band-aid from before 0.23.
+
+Since templating is done before parsing the CommonMark content, some attributes lik `content`, `summary` and `toc` will be empty while rendering.
+Fields depending on other pages (like `backlinks`, `translations`, `subsections` etc) will also be empty.
+
+See the [Tera migration guide](https://github.com/Keats/tera/blob/master/MIGRATION.md) if you're updating to 0.23 or higher.
+
+### Migrating from shortcodes
+
+Shortcodes have been removed in 0.23. The closest feature available now is [Tera components](https://keats.github.io/tera/#components).
+These components can be used in your content but also in your templates, unlike shortcodes.
+
+`page`, `config` etc are not available automatically in the components: use implicit parameters on the component
+you want to use in your content if you need them.
+
+```j2
+{% raw -%}
+{% component something(@config) %}
+...
+{% endcomponent %}
+{%- raw %}
+```
+### Avoiding template compilation error
+
+Since all content is now potentially a template, you might have compilation errors if you have sigils like {% raw %}`{{`/`{%`{% endraw %} in your content.
+
+You have 2 ways of fixing it:
+
+1. If you don't need templating/components in your content, set the `skip_content_templating` option from the config file to match all content files
+2. Wrap the offending lines in {{ "`{% raw %}{% endraw %}`" }} so they are ignored
+
+This documentation site uses both approaches, you can always look at the [source](https://github.com/getzola/zola/tree/master/docs/content/documentation)
+since it does have a lot of Tera code in it.
+
 ## Asset colocation
 
 The `content` directory is not limited to markup files. It's natural to want to co-locate a page and some related
@@ -43,6 +80,12 @@ assets, such as images or spreadsheets. Zola supports this pattern out of the bo
 
 All non-Markdown files you add in a page/section directory will be copied alongside the generated page when the site is
 built, which allows us to use a relative path to access them.
+
+By default these files are copied, so an asset shared across several outputs (for example the same image in multiple
+localized versions of a page) ends up duplicated on disk. Setting `hard_link_static = true` in the
+[configuration](@/documentation/getting-started/configuration.md) hard-links colocated assets instead of copying them,
+avoiding that duplication. As with the `static` directory, this requires the content and output directories to be on the
+same filesystem.
 
 Pages with co-located assets should not be placed directly in their section directory (such as `latest-experiment.md`), but
 as an `index.md` file in a dedicated directory (`latest-experiment/index.md`), like so:
@@ -52,16 +95,16 @@ as an `index.md` file in a dedicated directory (`latest-experiment/index.md`), l
 └── research
     ├── latest-experiment
     │   ├── index.md
-    │   └── yavascript.js
+    │   └── javascript.js
     ├── _index.md
     └── research.jpg
 ```
 
 With this setup, you may access `research.jpg` from your 'research' section
-and `yavascript.js` from your 'latest-experiment' page directly within the Markdown:
+and `javascript.js` from your 'latest-experiment' page directly within the Markdown:
 
 ```Markdown
-Check out the complete program [here](yavascript.js). It's **really cool free-software**!
+Check out the complete program [here](javascript.js). It's **really cool free-software**!
 ```
 
 By default, this page's slug will be the directory name and thus its permalink will be `https://example.com/research/latest-experiment/`.
@@ -70,13 +113,13 @@ By default, this page's slug will be the directory name and thus its permalink w
 
 It is possible to ignore selected asset files using the
 [ignored_content](@/documentation/getting-started/configuration.md) setting in the config file.
-For example, say that you have an Excel spreadsheet from which you are taking several screenshots and
-then linking to these image files on your website. For maintainability, you want to keep
-the spreadsheet in the same directory as the Markdown file, but you don't want to copy the spreadsheet to
-the public web site. You can achieve this by setting `ignored_content` in the config file:
+For example, say that you have several code files which you are linking to on your website.
+For maintainability, you want to keep your code in the same directory as the Markdown file,
+but you don't want to copy the build folders to the public web site. You can achieve this by setting `ignored_content` in the config file:
 
+(Note of caution: `{Cargo.lock,target}` is _not_ the same as `{Cargo.lock, target}`)
 ```
-ignored_content = ["*.xlsx"]
+ignored_content = ["code_articles/**/{Cargo.lock,target}, *.rs"]
 ```
 
 ## Static assets
@@ -85,7 +128,7 @@ In addition to placing content files in the `content` directory, you may also pl
 files in the `static` directory.  Any files/directories that you place in the `static` directory
 will be copied, without modification, to the `public` directory.
 
-Typically, you might put site-wide assets (such as the site favicon, site logos or site-wide
+Typically, you might put site-wide assets (such as a CSS file, the site favicon, site logos or site-wide
 JavaScript) in the root of the static directory. You can also place any HTML or other files that
 you wish to be included without modification (that is, without being parsed as Markdown files)
 into the static directory.

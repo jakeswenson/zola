@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use path_slash::PathExt;
 use site::Site;
 use std::ffi::OsStr;
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
 // 2 helper macros to make all the build testing more bearable
 #[macro_export]
@@ -36,17 +36,24 @@ macro_rules! file_contains {
     }};
 }
 
+/// Resolves the path to a test site, canonicalizing it like the `zola` cli does
+/// To ensure Windows canonicalization does not mess things up
+pub fn test_site_path(name: &str) -> PathBuf {
+    let mut path = env::current_dir().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
+    path.push(name);
+    path.canonicalize().expect("canonicalize test site path")
+}
+
 /// We return the tmpdir otherwise it would get out of scope and be deleted
 /// The tests can ignore it if they dont need it by prefixing it with a `_`
 pub fn build_site(name: &str) -> (Site, TempDir, PathBuf) {
-    let mut path = env::current_dir().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
-    path.push(name);
+    let path = test_site_path(name);
     let config_file = path.join("config.toml");
     let mut site = Site::new(&path, &config_file).unwrap();
     site.load().unwrap();
     let tmp_dir = tempdir().expect("create temp dir");
     let public = &tmp_dir.path().join("public");
-    site.set_output_path(&public);
+    site.set_output_path(public);
     site.build().expect("Couldn't build the site");
     (site, tmp_dir, public.clone())
 }
@@ -56,8 +63,7 @@ pub fn build_site_with_setup<F>(name: &str, mut setup_cb: F) -> (Site, TempDir, 
 where
     F: FnMut(Site) -> (Site, bool),
 {
-    let mut path = env::current_dir().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
-    path.push(name);
+    let path = test_site_path(name);
     let config_file = path.join("config.toml");
     let site = Site::new(&path, &config_file).unwrap();
     let (mut site, needs_loading) = setup_cb(site);
@@ -66,7 +72,7 @@ where
     }
     let tmp_dir = tempdir().expect("create temp dir");
     let public = &tmp_dir.path().join("public");
-    site.set_output_path(&public);
+    site.set_output_path(public);
     site.build().expect("Couldn't build the site");
     (site, tmp_dir, public.clone())
 }
@@ -94,17 +100,17 @@ fn find_lang_for(entry: &Path, base_dir: &Path) -> Option<(String, Option<String
         let mut unified_path = no_ext.clone();
         unified_path.pop();
         // Readd stem with .md added
-        unified_path.push(&format!("{}.md", stem.unwrap().to_str().unwrap()));
+        unified_path.push(format!("{}.md", stem.unwrap().to_str().unwrap()));
         let unified_path_str = match unified_path.strip_prefix(base_dir) {
             Ok(path_without_prefix) => path_without_prefix.to_slash_lossy(),
             _ => unified_path.to_slash_lossy(),
         };
-        Some((unified_path_str, Some(lang.to_str().unwrap().into())))
+        Some((unified_path_str.to_string(), Some(lang.to_str().unwrap().into())))
     } else {
         // No lang, return no_ext directly
         let mut no_ext_string = match no_ext.strip_prefix(base_dir) {
-            Ok(path_without_prefix) => path_without_prefix.to_slash_lossy(),
-            _ => no_ext.to_slash_lossy(),
+            Ok(path_without_prefix) => path_without_prefix.to_slash_lossy().to_string(),
+            _ => no_ext.to_slash_lossy().to_string(),
         };
         no_ext_string.push_str(".md");
         Some((no_ext_string, None))
@@ -151,8 +157,7 @@ pub fn find_expected_translations(
     name: &str,
     default_language: &str,
 ) -> HashMap<String, Vec<String>> {
-    let mut path = env::current_dir().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
-    path.push(name);
+    let mut path = test_site_path(name);
     path.push("content");
 
     // Find expected translations from content folder
@@ -183,21 +188,20 @@ pub struct Translations {
 
 impl Translations {
     pub fn for_path(site: &Site, path: &str) -> Translations {
-        let library = site.library.clone();
-        let library = library.read().unwrap();
         // WORKAROUND because site.content_path is private
         let unified_path = if let Some(page) =
-            library.get_page(site.base_path.join("content").join(path))
+            site.library.pages.get(&site.base_path.join("content").join(path))
         {
             page.file.canonical.clone()
-        } else if let Some(section) = library.get_section(site.base_path.join("content").join(path))
+        } else if let Some(section) =
+            site.library.sections.get(&site.base_path.join("content").join(path))
         {
             section.file.canonical.clone()
         } else {
             panic!("No such page or section: {}", path);
         };
 
-        let translations = library.translations.get(&unified_path);
+        let translations = site.library.translations.get(&unified_path);
         if translations.is_none() {
             println!(
                 "Page canonical path {} is not in library translations",
@@ -213,14 +217,14 @@ impl Translations {
                 // Are we looking for a section? (no file extension here)
                 if unified_path.ends_with("_index") {
                     //library.get_section_by_key(*key).file.relative.to_string()
-                    let section = library.get_section_by_key(*key);
+                    let section = &site.library.sections[key];
                     Translation {
                         lang: section.lang.clone(),
                         permalink: section.permalink.clone(),
                         path: section.file.path.to_str().unwrap().to_string(),
                     }
                 } else {
-                    let page = library.get_page_by_key(*key);
+                    let page = &site.library.pages[key];
                     Translation {
                         lang: page.lang.clone(),
                         permalink: page.permalink.clone(),

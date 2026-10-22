@@ -1,0 +1,780 @@
+/// A page, can be a blog post or a basic page
+use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+
+use ahash::AHashMap;
+use config::Config;
+use errors::Result;
+use regex::Regex;
+use utils::slugs::slugify_paths;
+use utils::table_of_contents::Heading;
+
+use crate::file_info::FileInfo;
+use crate::front_matter::{PageFrontMatter, split_page_content};
+use crate::utils::get_reading_analytics;
+use crate::utils::{find_related_assets, get_colocated_assets, has_anchor};
+use utils::anchors::has_anchor_id;
+use utils::fs::read_file;
+
+// Based on https://regex101.com/r/H2n38Z/1/tests
+// A regex parsing RFC3339 date followed by {_,-} and some characters
+static RFC3339_DATE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^(?P<datetime>(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])(T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9]|60)(\.[0-9]+)?(Z|(\+|-)([01][0-9]|2[0-3]):([0-5][0-9])))?)(\s?(_|-)(?P<slug>.+$))?"
+    ).unwrap()
+});
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Page {
+    /// All info about the actual file
+    pub file: FileInfo,
+    /// The front matter meta-data
+    pub meta: PageFrontMatter,
+    /// The list of parent sections relative paths
+    pub ancestors: Vec<String>,
+    /// The actual content of the page, in markdown
+    pub raw_content: String,
+    /// All the non-md files we found next to the .md file
+    pub assets: Vec<PathBuf>,
+    /// All the non-md files we found next to the .md file
+    pub serialized_assets: Vec<String>,
+    /// The HTML rendered of the page
+    pub content: String,
+    /// The slug of that page.
+    /// First tries to find the slug in the meta and defaults to filename otherwise
+    pub slug: String,
+    /// The URL path of the page, always starting with a slash
+    pub path: String,
+    /// The components of the path of the page
+    pub components: Vec<String>,
+    /// The full URL for that page
+    pub permalink: String,
+    /// The summary for the article, defaults to None
+    /// When <!-- more --> is found in the text, will take the content up to that part
+    /// as summary
+    pub summary: Option<String>,
+    /// The previous page when sorting: later/later_updated/lighter/prev
+    pub lower: Option<PathBuf>,
+    /// The next page when sorting: earlier/earlier_updated/heavier/next
+    pub higher: Option<PathBuf>,
+    /// Toc made from the headings of the markdown file
+    pub toc: Vec<Heading>,
+    /// How many words in the raw content
+    pub word_count: Option<usize>,
+    /// How long would it take to read the raw content.
+    /// See `get_reading_analytics` on how it is calculated
+    pub reading_time: Option<usize>,
+    /// The language of that page. Equal to the default lang if the user doesn't setup `languages` in config.
+    /// Corresponds to the lang in the {slug}.{lang}.md file scheme
+    pub lang: String,
+    /// Contains all the translated version of that page
+    pub translations: Vec<PathBuf>,
+    /// The list of all internal links (as path to markdown file), with optional anchor fragments.
+    /// We can only check the anchor after all pages have been built and their ToC compiled.
+    /// The page itself should exist otherwise it would have errored before getting there.
+    pub internal_links: Vec<(String, Option<String>)>,
+    /// The list of all links to external webpages. They can be validated by the `link_checker`.
+    pub external_links: Vec<String>,
+    /// For each asset: (asset path -> (language-less md path, relative path from md file)
+    pub colocated_assets: AHashMap<String, (String, String)>,
+    /// Computed visibility
+    pub hidden: bool,
+}
+
+impl Page {
+    pub fn new<P: AsRef<Path>>(file_path: P, meta: PageFrontMatter, base_path: &Path) -> Page {
+        let file_path = file_path.as_ref();
+
+        Page { file: FileInfo::new_page(file_path, base_path), meta, ..Self::default() }
+    }
+
+    /// Parse a page given the content of the .md file
+    /// Files without front matter or with invalid front matter are considered
+    /// erroneous
+    pub fn parse(
+        file_path: &Path,
+        content: &str,
+        config: &Config,
+        base_path: &Path,
+    ) -> Result<Page> {
+        let (meta, content) = split_page_content(file_path, content)?;
+        let mut page = Page::new(file_path, meta, base_path);
+
+        page.lang =
+            page.file.find_language(&config.default_language, &config.other_languages_codes())?;
+
+        page.raw_content = content.to_string();
+        let (word_count, reading_time) = get_reading_analytics(&page.raw_content, &page.lang);
+        page.word_count = Some(word_count);
+        page.reading_time = Some(reading_time);
+
+        let mut slug_from_dated_filename = None;
+
+        let file_path_for_slug = if page.file.name == "index" {
+            if let Some(parent) = page.file.path.parent() {
+                parent.file_name().unwrap().to_str().unwrap().to_string()
+            } else {
+                page.file.name.to_string()
+            }
+        } else {
+            page.file.name.to_string()
+        };
+
+        if let Some(ref caps) = RFC3339_DATE.captures(&file_path_for_slug) {
+            if caps.name("slug").is_some() && !config.slugify.paths_keep_dates {
+                slug_from_dated_filename = Some(caps.name("slug").unwrap().as_str().to_string());
+            }
+            if page.meta.date.is_none() {
+                page.meta.date = Some(caps.name("datetime").unwrap().as_str().to_string());
+                page.meta.date_to_datetime();
+            }
+        }
+
+        page.slug = {
+            if let Some(ref slug) = page.meta.slug {
+                slugify_paths(slug, config.slugify.paths)
+            } else if let Some(slug) = slug_from_dated_filename {
+                slugify_paths(&slug, config.slugify.paths)
+            } else {
+                slugify_paths(&file_path_for_slug, config.slugify.paths)
+            }
+        };
+
+        page.path = if let Some(ref p) = page.meta.path {
+            let path = p.trim();
+
+            if path.starts_with('/') { path.into() } else { format!("/{}", path) }
+        } else {
+            let mut path = if page.file.components.is_empty() {
+                if page.file.name == "index" && page.file.colocated_path.is_none() {
+                    String::new()
+                } else {
+                    page.slug.clone()
+                }
+            } else {
+                format!("{}/{}", page.file.components.join("/"), page.slug)
+            };
+
+            if page.lang != config.default_language {
+                path = format!("{}/{}", page.lang, path);
+            }
+
+            format!("/{}", path)
+        };
+
+        if !page.path.ends_with('/') {
+            page.path = format!("{}/", page.path);
+        }
+
+        page.components = page
+            .path
+            .split('/')
+            .map(|p| p.to_string())
+            .filter(|p| !p.is_empty())
+            .collect::<Vec<_>>();
+        page.permalink = config.make_permalink(&page.path);
+
+        Ok(page)
+    }
+
+    /// Read and parse a .md file into a Page struct
+    pub fn from_file<P: AsRef<Path>>(path: P, config: &Config, base_path: &Path) -> Result<Page> {
+        let path = path.as_ref();
+        let content = read_file(path)?;
+        let mut page = Page::parse(path, &content, config, base_path)?;
+
+        if page.file.name == "index" {
+            let parent_dir = path.parent().unwrap();
+            page.assets = find_related_assets(parent_dir, config, true);
+            page.serialized_assets = page.serialize_assets(base_path);
+            if let Some(colocated_path) = page.file.colocated_path.as_ref()
+                && !page.assets.is_empty()
+            {
+                page.colocated_assets = get_colocated_assets(
+                    &page.assets,
+                    page.file.path.parent().unwrap(),
+                    colocated_path,
+                    &format!("{}index.md", colocated_path),
+                );
+            }
+        } else {
+            page.assets = vec![];
+        }
+
+        Ok(page)
+    }
+
+    /// Creates a vectors of asset URLs.
+    fn serialize_assets(&self, base_path: &Path) -> Vec<String> {
+        self.assets
+            .iter()
+            .filter_map(|asset| asset.strip_prefix(self.file.path.parent().unwrap()).ok())
+            .filter_map(|filename| filename.to_str())
+            .map(|filename| {
+                let mut path = self.file.path.clone();
+                // Popping the index.md from the path since file.parent would be one level too high
+                // for our need here
+                path.pop();
+                path.push(filename);
+                path = path
+                    .strip_prefix(base_path.join("content"))
+                    .expect("Should be able to strip prefix")
+                    .to_path_buf();
+                path
+            })
+            .map(|path| format!("/{}", path.display()))
+            .collect()
+    }
+
+    pub fn has_anchor(&self, anchor: &str) -> bool {
+        has_anchor(&self.toc, anchor)
+    }
+
+    pub fn has_anchor_id(&self, id: &str) -> bool {
+        has_anchor_id(&self.content, id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+
+    use fs_err as fs;
+    use globset::{Glob, GlobSetBuilder};
+    use tempfile::tempdir;
+
+    use crate::Page;
+    use config::{Config, LanguageOptions};
+    use utils::slugs::SlugifyStrategy;
+
+    #[test]
+    fn can_parse_a_valid_page() {
+        let config = Config::default_for_test();
+        let content = r#"
++++
+title = "Hello"
+description = "hey there"
+slug = "hello-world"
++++
+Hello world"#;
+        let res = Page::parse(Path::new("post.md"), content, &config, &PathBuf::new());
+        assert!(res.is_ok());
+        let page = res.unwrap();
+
+        assert_eq!(page.meta.title.unwrap(), "Hello".to_string());
+        assert_eq!(page.meta.slug.unwrap(), "hello-world".to_string());
+        assert_eq!(page.raw_content, "Hello world");
+    }
+
+    #[test]
+    fn can_parse_author() {
+        let config = Config::default_for_test();
+        let content = r#"
++++
+title = "Hello"
+description = "hey there"
+authors = ["person@example.com (A. Person)"]
++++
+Hello world"#;
+        let res = Page::parse(Path::new("post.md"), content, &config, &PathBuf::new());
+        assert!(res.is_ok());
+        let page = res.unwrap();
+
+        assert_eq!(1, page.meta.authors.len());
+        assert_eq!("person@example.com (A. Person)", page.meta.authors.get(0).unwrap());
+    }
+
+    #[test]
+    fn test_can_make_url_from_sections_and_slug() {
+        let content = r#"
+    +++
+    slug = "hello-world"
+    +++
+    Hello world"#;
+        let mut conf = Config::default();
+        conf.base_url = "http://hello.com/".to_string();
+        let res =
+            Page::parse(Path::new("content/posts/intro/start.md"), content, &conf, &PathBuf::new());
+        assert!(res.is_ok());
+        let page = res.unwrap();
+        assert_eq!(page.path, "/posts/intro/hello-world/");
+        assert_eq!(page.components, vec!["posts", "intro", "hello-world"]);
+        assert_eq!(page.permalink, "http://hello.com/posts/intro/hello-world/");
+    }
+
+    #[test]
+    fn can_make_url_from_slug_only() {
+        let content = r#"
+    +++
+    slug = "hello-world"
+    +++
+    Hello world"#;
+        let config = Config::default();
+        let res = Page::parse(Path::new("start.md"), content, &config, &PathBuf::new());
+        assert!(res.is_ok());
+        let page = res.unwrap();
+        assert_eq!(page.path, "/hello-world/");
+        assert_eq!(page.components, vec!["hello-world"]);
+        assert_eq!(page.permalink, config.make_permalink("hello-world"));
+    }
+
+    #[test]
+    fn can_make_url_from_slug_only_with_no_special_chars() {
+        let content = r#"
+    +++
+    slug = "hello-&-world"
+    +++
+    Hello world"#;
+        let mut config = Config::default();
+        config.slugify.paths = SlugifyStrategy::On;
+        let res = Page::parse(Path::new("start.md"), content, &config, &PathBuf::new());
+        assert!(res.is_ok());
+        let page = res.unwrap();
+        assert_eq!(page.path, "/hello-world/");
+        assert_eq!(page.components, vec!["hello-world"]);
+        assert_eq!(page.permalink, config.make_permalink("hello-world"));
+    }
+
+    #[test]
+    fn can_make_url_from_utf8_slug_frontmatter() {
+        let content = r#"
+    +++
+    slug = "日本"
+    +++
+    Hello world"#;
+        let mut config = Config::default();
+        config.slugify.paths = SlugifyStrategy::Safe;
+        let res = Page::parse(Path::new("start.md"), content, &config, &PathBuf::new());
+        assert!(res.is_ok());
+        let page = res.unwrap();
+        assert_eq!(page.path, "/日本/");
+        assert_eq!(page.components, vec!["日本"]);
+        assert_eq!(page.permalink, config.make_permalink("日本"));
+    }
+
+    #[test]
+    fn can_make_url_from_path() {
+        let content = r#"
+    +++
+    path = "hello-world"
+    +++
+    Hello world"#;
+        let config = Config::default();
+        let res = Page::parse(
+            Path::new("content/posts/intro/start.md"),
+            content,
+            &config,
+            &PathBuf::new(),
+        );
+        assert!(res.is_ok());
+        let page = res.unwrap();
+        assert_eq!(page.path, "/hello-world/");
+        assert_eq!(page.components, vec!["hello-world"]);
+        assert_eq!(page.permalink, config.make_permalink("hello-world"));
+    }
+
+    #[test]
+    fn can_make_url_from_path_starting_slash() {
+        let content = r#"
+    +++
+    path = "/hello-world"
+    +++
+    Hello world"#;
+        let config = Config::default();
+        let res = Page::parse(
+            Path::new("content/posts/intro/start.md"),
+            content,
+            &config,
+            &PathBuf::new(),
+        );
+        assert!(res.is_ok());
+        let page = res.unwrap();
+        assert_eq!(page.path, "/hello-world/");
+        assert_eq!(page.permalink, config.make_permalink("hello-world"));
+    }
+
+    #[test]
+    fn errors_on_invalid_front_matter_format() {
+        // missing starting +++
+        let content = r#"
+    title = "Hello"
+    description = "hey there"
+    slug = "hello-world"
+    +++
+    Hello world"#;
+        let res = Page::parse(Path::new("start.md"), content, &Config::default(), &PathBuf::new());
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn can_make_slug_from_non_slug_filename() {
+        let mut config = Config::default();
+        config.slugify.paths = SlugifyStrategy::On;
+        let res =
+            Page::parse(Path::new(" file with space.md"), "+++\n+++\n", &config, &PathBuf::new());
+        assert!(res.is_ok());
+        let page = res.unwrap();
+        assert_eq!(page.slug, "file-with-space");
+        assert_eq!(page.permalink, config.make_permalink(&page.slug));
+    }
+
+    #[test]
+    fn can_make_path_from_utf8_filename() {
+        let mut config = Config::default();
+        config.slugify.paths = SlugifyStrategy::Safe;
+        let res = Page::parse(Path::new("日本.md"), "+++\n+++\n", &config, &PathBuf::new());
+        assert!(res.is_ok());
+        let page = res.unwrap();
+        assert_eq!(page.slug, "日本");
+        assert_eq!(page.permalink, config.make_permalink(&page.slug));
+    }
+
+    #[test]
+    fn page_with_assets_gets_right_info() {
+        let tmp_dir = tempdir().expect("create temp dir");
+        let path = tmp_dir.path();
+        fs::create_dir(&path.join("content")).expect("create content temp dir");
+        fs::create_dir(&path.join("content").join("posts")).expect("create posts temp dir");
+        let nested_path = path.join("content").join("posts").join("with-assets");
+        fs::create_dir(&nested_path).expect("create nested temp dir");
+        let mut f = fs::File::create(nested_path.join("index.md")).unwrap();
+        f.write_all(b"+++\n+++\n").unwrap();
+        fs::File::create(nested_path.join("example.js")).unwrap();
+        fs::File::create(nested_path.join("graph.jpg")).unwrap();
+        fs::File::create(nested_path.join("fail.png")).unwrap();
+
+        let res = Page::from_file(nested_path.join("index.md").as_path(), &Config::default(), path);
+        assert!(res.is_ok());
+        let page = res.unwrap();
+        assert_eq!(page.file.parent, path.join("content").join("posts"));
+        assert_eq!(page.slug, "with-assets");
+        assert_eq!(page.assets.len(), 3);
+        assert!(page.serialized_assets[0].starts_with('/'));
+        assert_eq!(page.permalink, "http://a-website.com/posts/with-assets/");
+    }
+
+    #[test]
+    fn page_with_assets_and_slug_overrides_path() {
+        let tmp_dir = tempdir().expect("create temp dir");
+        let path = tmp_dir.path();
+        fs::create_dir(&path.join("content")).expect("create content temp dir");
+        fs::create_dir(&path.join("content").join("posts")).expect("create posts temp dir");
+        let nested_path = path.join("content").join("posts").join("with-assets");
+        fs::create_dir(&nested_path).expect("create nested temp dir");
+        let mut f = fs::File::create(nested_path.join("index.md")).unwrap();
+        f.write_all(b"+++\nslug=\"hey\"\n+++\n").unwrap();
+        fs::File::create(nested_path.join("example.js")).unwrap();
+        fs::File::create(nested_path.join("graph.jpg")).unwrap();
+        fs::File::create(nested_path.join("fail.png")).unwrap();
+
+        let res = Page::from_file(nested_path.join("index.md").as_path(), &Config::default(), path);
+        assert!(res.is_ok());
+        let page = res.unwrap();
+        assert_eq!(page.file.parent, path.join("content").join("posts"));
+        assert_eq!(page.slug, "hey");
+        assert_eq!(page.assets.len(), 3);
+        assert_eq!(page.permalink, "http://a-website.com/posts/hey/");
+    }
+
+    // https://github.com/getzola/zola/issues/674
+    #[test]
+    fn page_with_assets_uses_filepath_for_assets() {
+        let tmp_dir = tempdir().expect("create temp dir");
+        let path = tmp_dir.path();
+        fs::create_dir(&path.join("content")).expect("create content temp dir");
+        fs::create_dir(&path.join("content").join("posts")).expect("create posts temp dir");
+        let nested_path = path.join("content").join("posts").join("with_assets");
+        fs::create_dir(&nested_path).expect("create nested temp dir");
+        let mut f = fs::File::create(nested_path.join("index.md")).unwrap();
+        f.write_all(b"+++\n+++\n").unwrap();
+        fs::File::create(nested_path.join("example.js")).unwrap();
+        fs::File::create(nested_path.join("graph.jpg")).unwrap();
+        fs::File::create(nested_path.join("fail.png")).unwrap();
+
+        let res = Page::from_file(nested_path.join("index.md").as_path(), &Config::default(), path);
+        assert!(res.is_ok());
+        let page = res.unwrap();
+        assert_eq!(page.file.parent, path.join("content").join("posts"));
+        assert_eq!(page.assets.len(), 3);
+        assert_eq!(page.serialized_assets.len(), 3);
+        // We should not get with-assets since that's the slugified version
+        assert!(page.serialized_assets[0].contains("with_assets"));
+        assert_eq!(page.permalink, "http://a-website.com/posts/with-assets/");
+    }
+
+    // https://github.com/getzola/zola/issues/607
+    #[test]
+    fn page_with_assets_and_date_in_folder_name() {
+        let tmp_dir = tempdir().expect("create temp dir");
+        let path = tmp_dir.path();
+        fs::create_dir(&path.join("content")).expect("create content temp dir");
+        fs::create_dir(&path.join("content").join("posts")).expect("create posts temp dir");
+        let nested_path = path.join("content").join("posts").join("2013-06-02_with-assets");
+        fs::create_dir(&nested_path).expect("create nested temp dir");
+        let mut f = fs::File::create(nested_path.join("index.md")).unwrap();
+        f.write_all(b"+++\n\n+++\n").unwrap();
+        fs::File::create(nested_path.join("example.js")).unwrap();
+        fs::File::create(nested_path.join("graph.jpg")).unwrap();
+        fs::File::create(nested_path.join("fail.png")).unwrap();
+
+        let res = Page::from_file(nested_path.join("index.md").as_path(), &Config::default(), path);
+        assert!(res.is_ok());
+        let page = res.unwrap();
+        assert_eq!(page.file.parent, path.join("content").join("posts"));
+        assert_eq!(page.slug, "with-assets");
+        assert_eq!(page.meta.date, Some("2013-06-02".to_string()));
+        assert_eq!(page.assets.len(), 3);
+        assert_eq!(page.permalink, "http://a-website.com/posts/with-assets/");
+    }
+
+    #[test]
+    fn page_with_ignored_assets_filters_out_correct_files() {
+        let tmp_dir = tempdir().expect("create temp dir");
+        let path = tmp_dir.path();
+        fs::create_dir(&path.join("content")).expect("create content temp dir");
+        fs::create_dir(&path.join("content").join("posts")).expect("create posts temp dir");
+        let nested_path = path.join("content").join("posts").join("with-assets");
+        fs::create_dir(&nested_path).expect("create nested temp dir");
+        let mut f = fs::File::create(nested_path.join("index.md")).unwrap();
+        f.write_all(b"+++\nslug=\"hey\"\n+++\n").unwrap();
+        fs::File::create(nested_path.join("example.js")).unwrap();
+        fs::File::create(nested_path.join("graph.jpg")).unwrap();
+        fs::File::create(nested_path.join("fail.png")).unwrap();
+
+        let mut gsb = GlobSetBuilder::new();
+        gsb.add(Glob::new("*.{js,png}").unwrap());
+        let mut config = Config::default();
+        config.ignored_content_globset = Some(gsb.build().unwrap());
+
+        let res = Page::from_file(nested_path.join("index.md").as_path(), &config, path);
+
+        assert!(res.is_ok());
+        let page = res.unwrap();
+        assert_eq!(page.assets.len(), 1);
+        assert_eq!(page.assets[0].file_name().unwrap().to_str(), Some("graph.jpg"));
+    }
+
+    // https://github.com/getzola/zola/issues/1566
+    #[test]
+    fn colocated_page_with_slug_and_date_in_path() {
+        let tmp_dir = tempdir().expect("create temp dir");
+        let path = tmp_dir.path();
+        fs::create_dir(&path.join("content")).expect("create content temp dir");
+        let articles_path = path.join("content").join("articles");
+        fs::create_dir(&articles_path).expect("create posts temp dir");
+
+        let config = Config::default();
+
+        // first a non-colocated one
+        let file_path = articles_path.join("2021-07-29-sample-article-1.md");
+        let mut f = fs::File::create(&file_path).unwrap();
+        f.write_all(b"+++\nslug=\"hey\"\n+++\n").unwrap();
+        let res = Page::from_file(&file_path, &config, path);
+        assert!(res.is_ok());
+        let page = res.unwrap();
+        assert_eq!(page.path, "/articles/hey/");
+
+        // then a colocated one, it should still work
+        let dir_path = articles_path.join("2021-07-29-sample-article-2.md");
+        fs::create_dir(&dir_path).expect("create posts temp dir");
+        let mut f = fs::File::create(&dir_path.join("index.md")).unwrap();
+        f.write_all(b"+++\nslug=\"ho\"\n+++\n").unwrap();
+        let res = Page::from_file(&dir_path.join("index.md"), &config, path);
+        assert!(res.is_ok());
+        let page = res.unwrap();
+        assert_eq!(page.path, "/articles/ho/");
+    }
+
+    #[test]
+    fn can_get_date_from_short_date_in_filename() {
+        let config = Config::default();
+        let content = r#"
++++
++++
+Hello world
+<!-- more -->"#
+            .to_string();
+        let res = Page::parse(Path::new("2018-10-08_hello.md"), &content, &config, &PathBuf::new());
+        assert!(res.is_ok());
+        let page = res.unwrap();
+
+        assert_eq!(page.meta.date, Some("2018-10-08".to_string()));
+        assert_eq!(page.slug, "hello");
+    }
+
+    // https://github.com/getzola/zola/pull/1323#issuecomment-779401063
+    #[test]
+    fn can_get_date_from_short_date_in_filename_respects_slugification_strategy() {
+        let mut config = Config::default();
+        config.slugify.paths = SlugifyStrategy::Off;
+        let content = r#"
++++
++++
+Hello world
+<!-- more -->"#
+            .to_string();
+        let res =
+            Page::parse(Path::new("2018-10-08_ こんにちは.md"), &content, &config, &PathBuf::new());
+        assert!(res.is_ok());
+        let page = res.unwrap();
+
+        assert_eq!(page.meta.date, Some("2018-10-08".to_string()));
+        assert_eq!(page.slug, " こんにちは");
+    }
+
+    #[test]
+    fn can_get_date_from_filename_with_spaces() {
+        let config = Config::default();
+        let content = r#"
++++
++++
+Hello world
+<!-- more -->"#
+            .to_string();
+        let res =
+            Page::parse(Path::new("2018-10-08 - hello.md"), &content, &config, &PathBuf::new());
+        assert!(res.is_ok());
+        let page = res.unwrap();
+
+        assert_eq!(page.meta.date, Some("2018-10-08".to_string()));
+        assert_eq!(page.slug, "hello");
+    }
+
+    #[test]
+    fn can_get_date_from_filename_with_spaces_respects_slugification() {
+        let mut config = Config::default();
+        config.slugify.paths = SlugifyStrategy::Off;
+        let content = r#"
++++
++++
+Hello world
+<!-- more -->"#
+            .to_string();
+        let res =
+            Page::parse(Path::new("2018-10-08 - hello.md"), &content, &config, &PathBuf::new());
+        assert!(res.is_ok());
+        let page = res.unwrap();
+
+        assert_eq!(page.meta.date, Some("2018-10-08".to_string()));
+        assert_eq!(page.slug, " hello");
+    }
+
+    #[test]
+    fn can_get_date_from_full_rfc3339_date_in_filename() {
+        let config = Config::default();
+        let content = r#"
++++
++++
+Hello world
+<!-- more -->"#
+            .to_string();
+        let res = Page::parse(
+            Path::new("2018-10-02T15:00:00Z-hello.md"),
+            &content,
+            &config,
+            &PathBuf::new(),
+        );
+        assert!(res.is_ok());
+        let page = res.unwrap();
+
+        assert_eq!(page.meta.date, Some("2018-10-02T15:00:00Z".to_string()));
+        assert_eq!(page.slug, "hello");
+    }
+
+    // https://github.com/getzola/zola/pull/1323#issuecomment-779401063
+    #[test]
+    fn can_get_date_from_full_rfc3339_date_in_filename_respects_slugification_strategy() {
+        let mut config = Config::default();
+        config.slugify.paths = SlugifyStrategy::Off;
+        let content = r#"
++++
++++
+Hello world
+<!-- more -->"#
+            .to_string();
+        let res = Page::parse(
+            Path::new("2018-10-02T15:00:00Z- こんにちは.md"),
+            &content,
+            &config,
+            &PathBuf::new(),
+        );
+        assert!(res.is_ok());
+        let page = res.unwrap();
+
+        assert_eq!(page.meta.date, Some("2018-10-02T15:00:00Z".to_string()));
+        assert_eq!(page.slug, " こんにちは");
+    }
+
+    #[test]
+    fn frontmatter_date_override_filename_date() {
+        let config = Config::default();
+        let content = r#"
++++
+date = 2018-09-09
++++
+Hello world
+<!-- more -->"#
+            .to_string();
+        let res = Page::parse(Path::new("2018-10-08_hello.md"), &content, &config, &PathBuf::new());
+        assert!(res.is_ok());
+        let page = res.unwrap();
+
+        assert_eq!(page.meta.date, Some("2018-09-09".to_string()));
+        assert_eq!(page.slug, "hello");
+    }
+
+    #[test]
+    fn can_specify_language_in_filename() {
+        let mut config = Config::default();
+        config.languages.insert("fr".to_owned(), LanguageOptions::default());
+        let content = r#"
++++
++++
+Bonjour le monde"#
+            .to_string();
+        let res = Page::parse(Path::new("hello.fr.md"), &content, &config, &PathBuf::new());
+        assert!(res.is_ok());
+        let page = res.unwrap();
+        assert_eq!(page.lang, "fr".to_string());
+        assert_eq!(page.slug, "hello");
+        assert_eq!(page.permalink, "http://a-website.com/fr/hello/");
+    }
+
+    #[test]
+    fn can_specify_language_in_filename_with_date() {
+        let mut config = Config::default();
+        config.languages.insert("fr".to_owned(), LanguageOptions::default());
+        let content = r#"
++++
++++
+Bonjour le monde"#
+            .to_string();
+        let res =
+            Page::parse(Path::new("2018-10-08_hello.fr.md"), &content, &config, &PathBuf::new());
+        assert!(res.is_ok());
+        let page = res.unwrap();
+        assert_eq!(page.meta.date, Some("2018-10-08".to_string()));
+        assert_eq!(page.lang, "fr".to_string());
+        assert_eq!(page.slug, "hello");
+        assert_eq!(page.permalink, "http://a-website.com/fr/hello/");
+    }
+
+    #[test]
+    fn i18n_frontmatter_path_overrides_default_permalink() {
+        let mut config = Config::default();
+        config.languages.insert("fr".to_owned(), LanguageOptions::default());
+        let content = r#"
++++
+path = "bonjour"
++++
+Bonjour le monde"#
+            .to_string();
+        let res = Page::parse(Path::new("hello.fr.md"), &content, &config, &PathBuf::new());
+        assert!(res.is_ok());
+        let page = res.unwrap();
+        assert_eq!(page.lang, "fr".to_string());
+        assert_eq!(page.slug, "hello");
+        assert_eq!(page.permalink, "http://a-website.com/bonjour/");
+    }
+}

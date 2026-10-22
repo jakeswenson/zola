@@ -7,11 +7,11 @@ Zola supports having a site in multiple languages.
 
 ## Configuration
 To get started, you will need to add the languages you want to support
-to your `config.toml`. For example:
+to your `zola.toml`. For example:
 
 ```toml
 [languages.fr]
-generate_feed = true # there will be a feed for French content
+generate_feeds = true # there will be a feed for French content
 build_search_index = true
 taxonomies = [
     {name = "auteurs"},
@@ -27,10 +27,13 @@ summary = "Mon blog"
 [languages.it.translations]
 summary = "Mio blog"
 
+# translations for the default language are not prefixed by languages.code
+[translations]
+summary = "My blog"
 ```
 
 Note: By default, Chinese and Japanese search indexing is not included. You can include
-the support by building `zola` using `cargo build --features search/indexing-ja --features search/indexing-zh`.
+the support by building `zola` using `cargo build --features indexing-ja --features indexing-zh`.
 Please also note that, enabling Chinese indexing will increase the binary size by approximately
 5 MB while enabling Japanese indexing will increase the binary size by approximately 70 MB
 due to the incredibly large dictionaries.

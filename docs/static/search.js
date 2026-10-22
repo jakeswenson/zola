@@ -142,26 +142,39 @@ function initSearch() {
     }
   };
   var currentTerm = "";
-  var index = elasticlunr.Index.load(window.searchIndex);
+  var index;
+  
+  var initIndex = async function () {
+    if (index === undefined) {
+      index = fetch("/search_index.en.json")
+        .then(
+          async function(response) {
+            return await elasticlunr.Index.load(await response.json());
+        }
+      );
+    }
+    let res = await index;
+    return res;
+  }
 
-  $searchInput.addEventListener("keyup", debounce(function() {
+  $searchInput.addEventListener("keyup", debounce(async function() {
     var term = $searchInput.value.trim();
-    if (term === currentTerm || !index) {
+    if (term === currentTerm) {
       return;
     }
     $searchResults.style.display = term === "" ? "none" : "block";
     $searchResultsItems.innerHTML = "";
+    currentTerm = term;
     if (term === "") {
       return;
     }
 
-    var results = index.search(term, options);
+    var results = (await initIndex()).search(term, options);
     if (results.length === 0) {
       $searchResults.style.display = "none";
       return;
     }
 
-    currentTerm = term;
     for (var i = 0; i < Math.min(results.length, MAX_ITEMS); i++) {
       var item = document.createElement("li");
       item.innerHTML = formatSearchResultItem(results[i], term.split(" "));

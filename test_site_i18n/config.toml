@@ -9,17 +9,23 @@ build_search_index = true
 
 default_language = "en"
 
-generate_feed = true
+generate_feeds = true
 
 taxonomies = [
     {name = "authors", feed = true},
     {name = "tags"},
 ]
 
+[search]
+include_title = true
+include_description = true
+include_path = true
+include_content = true
+
 [languages.fr]
-generate_feed = true
+generate_feeds = true
 taxonomies = [
-    {name = "auteurs"},
+    {name = "auteurs", feed = true},
     {name = "tags"},
 ]
 
@@ -27,7 +33,7 @@ taxonomies = [
 build_search_index = true
 
 [markdown]
-highlight_code = false
+# Highlighting is disabled (no highlighting section)
 
 
 [extra]

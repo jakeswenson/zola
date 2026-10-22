@@ -1,0 +1,173 @@
+use std::borrow::Cow;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::path::Path;
+
+use crate::ResizeOperation;
+use crate::format::Format;
+use exif::Exif;
+use image::DynamicImage;
+use image::imageops::FilterType;
+
+#[derive(Debug)]
+pub struct ExifNoSuchFieldError {
+    tag: exif::Tag,
+    ifd_num: exif::In,
+}
+
+#[derive(Debug)]
+pub enum ExifError<'a> {
+    NoSuchField(ExifNoSuchFieldError),
+    UnexpectedFieldType {
+        tag: exif::Tag,
+        ifd_num: exif::In,
+        expected: &'static str,
+        actual: &'a exif::Value,
+    },
+    EmptyValue {
+        tag: exif::Tag,
+        ifd_num: exif::In,
+    },
+}
+
+impl std::fmt::Display for ExifNoSuchFieldError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Found no field for tag {} and ifd_num {}.", self.tag, self.ifd_num)
+    }
+}
+
+impl<'a> std::fmt::Display for ExifError<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExifError::NoSuchField(e) => e.fmt(f),
+            ExifError::UnexpectedFieldType { tag, ifd_num, expected, actual } => write!(
+                f,
+                "Expected field for tag {} and ifd_num {} to have type {}, but found {:?}.",
+                tag, ifd_num, *expected, actual
+            ),
+            ExifError::EmptyValue { tag, ifd_num } => write!(
+                f,
+                "Expected the value of field for tag {} and ifd_num {} to have at least one element, but it was empty.",
+                tag, ifd_num
+            ),
+        }
+    }
+}
+
+impl<'a> std::convert::From<ExifNoSuchFieldError> for ExifError<'a> {
+    fn from(value: ExifNoSuchFieldError) -> Self {
+        Self::NoSuchField(value)
+    }
+}
+
+/// Apply image rotation based on EXIF data
+/// Returns `None` if no transformation is needed
+pub fn fix_orientation<'a>(
+    img: &DynamicImage,
+    metadata: &'a Exif,
+) -> Result<Option<DynamicImage>, ExifError<'a>> {
+    Ok(match get_orientation(metadata)? {
+        // Values are taken from the page 30 of
+        // https://www.cipa.jp/std/documents/e/DC-008-2012_E.pdf
+        // For more details check http://sylvana.net/jpegcrop/exif_orientation.html
+        1 => None,
+        2 => Some(img.fliph()),
+        3 => Some(img.rotate180()),
+        4 => Some(img.flipv()),
+        5 => Some(img.fliph().rotate270()),
+        6 => Some(img.rotate90()),
+        7 => Some(img.fliph().rotate90()),
+        8 => Some(img.rotate270()),
+        _ => None,
+    })
+}
+
+/// Adjusts the width and height of an image based on EXIF rotation data.
+pub fn get_rotated_size(w: u32, h: u32, metadata: &Exif) -> Result<(u32, u32), ExifError<'_>> {
+    // See fix_orientation for the meaning of these values.
+    Ok(match get_orientation(metadata)? {
+        5..=8 => (h, w),
+        _ => (w, h),
+    })
+}
+
+fn get_field_value(
+    metadata: &Exif,
+    tag: exif::Tag,
+    ifd_num: exif::In,
+) -> Result<&exif::Value, ExifNoSuchFieldError> {
+    let Some(field) = metadata.get_field(tag, ifd_num) else {
+        return Err(ExifNoSuchFieldError { tag, ifd_num });
+    };
+    Ok(&field.value)
+}
+
+fn get_orientation(metadata: &Exif) -> Result<u32, ExifError<'_>> {
+    let tag = exif::Tag::Orientation;
+    let ifd_num = exif::In::PRIMARY;
+
+    let val = get_field_value(metadata, tag, ifd_num)?;
+    let Some(orientation) = val.get_uint(0) else {
+        return Err(ExifError::EmptyValue { tag, ifd_num });
+    };
+    Ok(orientation)
+}
+
+fn get_string_field(
+    metadata: &Exif,
+    tag: exif::Tag,
+    ifd_num: exif::In,
+) -> Result<String, ExifError<'_>> {
+    let val = get_field_value(metadata, tag, ifd_num)?;
+    let exif::Value::Ascii(bytes) = val else {
+        return Err(ExifError::UnexpectedFieldType {
+            tag,
+            ifd_num,
+            expected: "exif::Value::Ascii",
+            actual: val,
+        });
+    };
+
+    if bytes.is_empty() {
+        return Err(ExifError::EmptyValue { tag, ifd_num });
+    }
+
+    let mut s = String::new();
+    s.push_str(&String::from_utf8_lossy(&bytes[0]));
+    Ok(s)
+}
+
+pub fn get_description(metadata: &Exif) -> Result<String, ExifError<'_>> {
+    get_string_field(metadata, exif::Tag::ImageDescription, exif::In::PRIMARY)
+}
+
+pub fn get_created_datetime(metadata: &Exif) -> Result<String, ExifError<'_>> {
+    get_string_field(metadata, exif::Tag::DateTimeOriginal, exif::In::PRIMARY)
+}
+
+/// We only use the input_path to get the file stem.
+/// Hashing the resolved `input_path` would include the absolute path to the image
+/// with all filesystem components.
+pub fn get_processed_filename(
+    input_path: &Path,
+    input_src: &str,
+    op: &ResizeOperation,
+    format: &Format,
+    filter: FilterType,
+) -> String {
+    let mut hasher = DefaultHasher::new();
+    hasher.write(input_src.as_ref());
+    op.hash(&mut hasher);
+    format.hash(&mut hasher);
+    // Only hash the filter if it's not the default.
+    if filter != FilterType::Lanczos3 {
+        filter.hash(&mut hasher);
+    }
+    let hash = hasher.finish();
+    let filename = input_path
+        .file_stem()
+        .map(|s| s.to_string_lossy())
+        .unwrap_or_else(|| Cow::Borrowed("unknown"));
+
+    format!("{}.{:016x}.{}", filename, hash, format.extension())
+}

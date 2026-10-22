@@ -1,45 +1,149 @@
-use std::{path::Path, sync::Arc};
+use giallo::{DataAttrPosition, HighlightOptions, Registry, ThemeVariant};
+use serde::{Deserialize, Serialize};
+use std::path::Path;
+use std::sync::Arc;
 
-use serde_derive::{Deserialize, Serialize};
-use syntect::{
-    highlighting::{Theme, ThemeSet},
-    html::css_for_theme_with_class_style,
-    parsing::{SyntaxSet, SyntaxSetBuilder},
-};
-
-use errors::{bail, Result};
-
-use crate::highlighting::{CLASS_STYLE, THEME_SET};
-
-pub const DEFAULT_HIGHLIGHT_THEME: &str = "base16-ocean-dark";
+use errors::{Result, bail};
+use utils::types::InsertAnchor;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ThemeCss {
-    /// Which theme are we generating the CSS from
-    pub theme: String,
-    /// In which file are we going to output the CSS
-    pub filename: String,
+#[serde(rename_all = "lowercase")]
+#[derive(Default)]
+pub enum HighlightStyle {
+    #[default]
+    Inline,
+    Class,
 }
 
-impl Default for ThemeCss {
-    fn default() -> ThemeCss {
-        ThemeCss { theme: String::new(), filename: String::new() }
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Highlighting {
+    /// Emit an error for missing highlight languages. Defaults to false
+    #[serde(default)]
+    pub error_on_missing_language: bool,
+    #[serde(default)]
+    pub style: HighlightStyle,
+    /// Single theme name. Mutually exclusive with light_theme/dark_theme.
+    pub theme: Option<String>,
+    /// Light theme for dual-theme mode.
+    pub light_theme: Option<String>,
+    /// Dark theme for dual-theme mode.
+    pub dark_theme: Option<String>,
+    /// If css output should set color-scheme when using a dual theme.
+    /// Defaults to true.
+    pub add_color_scheme: Option<bool>,
+    #[serde(default)]
+    pub extra_grammars: Vec<String>,
+    #[serde(default)]
+    pub extra_themes: Vec<String>,
+    #[serde(default)]
+    pub data_attr_position: DataAttrPosition,
+    // We pass the whole config around for some Tera functions and this is big
+    #[serde(skip, default)]
+    pub registry: Arc<Registry>,
+}
+
+impl Highlighting {
+    pub fn init(&mut self, config_dir: &Path) -> Result<()> {
+        let mut registry = Registry::builtin()?;
+
+        for grammar in &self.extra_grammars {
+            registry.add_grammar_from_path(config_dir.join(grammar))?;
+        }
+
+        for theme in &self.extra_themes {
+            registry.add_theme_from_path(config_dir.join(theme))?;
+        }
+
+        registry.link_grammars();
+
+        match (&self.theme, &self.light_theme, &self.dark_theme) {
+            (Some(theme), None, None) => {
+                if !registry.contains_theme(theme) {
+                    bail!("Theme `{theme}` does not exist");
+                }
+            }
+            (None, Some(light_theme), Some(dark_theme)) => {
+                if !registry.contains_theme(light_theme) {
+                    bail!("Theme `{light_theme}` does not exist");
+                }
+                if !registry.contains_theme(dark_theme) {
+                    bail!("Theme `{dark_theme}` does not exist");
+                }
+            }
+            (None, None, None) => {
+                bail!(
+                    "No theme specified in [markdown.highlighting]. Set either `theme` or both `light_theme` and `dark_theme`"
+                );
+            }
+            _ => {
+                bail!(
+                    "Invalid theme configuration: set either `theme` alone, or both `light_theme` and `dark_theme`"
+                );
+            }
+        }
+
+        self.registry = Arc::new(registry);
+
+        Ok(())
+    }
+
+    pub fn uses_classes(&self) -> bool {
+        self.style == HighlightStyle::Class
+    }
+
+    pub fn generate_themes_css(&self) -> Vec<(&'static str, String)> {
+        let mut out = Vec::new();
+
+        if self.style == HighlightStyle::Inline {
+            return out;
+        }
+
+        if let Some(theme) = &self.theme {
+            out.push((
+                "giallo.css",
+                self.registry.generate_css(theme, "z-").expect("theme to be present"),
+            ));
+        } else if let (Some(light_theme), Some(dark_theme)) = (&self.light_theme, &self.dark_theme)
+        {
+            let (light_css, dark_css) = self
+                .registry
+                .generate_dual_css(light_theme, dark_theme, "z-")
+                .expect("themes to be present");
+            out.push(("giallo-light.css", light_css));
+            out.push(("giallo-dark.css", dark_css));
+        }
+
+        out
+    }
+
+    pub fn highlight_options<'a>(&'a self, lang: &'a str) -> HighlightOptions {
+        let mut opt = if let Some(theme) = &self.theme {
+            HighlightOptions::new(lang, ThemeVariant::Single(theme))
+        } else {
+            // Validated in init(): light_theme and dark_theme are both present
+            let light = self.light_theme.as_deref().unwrap();
+            let dark = self.dark_theme.as_deref().unwrap();
+            HighlightOptions::new(lang, ThemeVariant::Dual { light, dark })
+        };
+
+        if !self.error_on_missing_language {
+            opt = opt.fallback_to_plain(true);
+        }
+
+        opt
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Markdown {
-    /// Whether to highlight all code blocks found in markdown files. Defaults to false
-    pub highlight_code: bool,
-    /// Which themes to use for code highlighting. See Readme for supported themes
-    /// Defaults to "base16-ocean-dark"
-    pub highlight_theme: String,
-    /// Generate CSS files for Themes out of syntect
-    pub highlight_themes_css: Vec<ThemeCss>,
+    /// Syntax highlighting option
+    pub highlighting: Option<Highlighting>,
     /// Whether to render emoji aliases (e.g.: :smile: => 😄) in the markdown files
     pub render_emoji: bool,
+    /// CSS class to add to external links
+    pub external_links_class: Option<String>,
     /// Whether external links are to be opened in a new tab
     /// If this is true, a `rel="noopener"` will always automatically be added for security reasons
     pub external_links_target_blank: bool,
@@ -47,109 +151,31 @@ pub struct Markdown {
     pub external_links_no_follow: bool,
     /// Whether to set rel="noreferrer" for all external links
     pub external_links_no_referrer: bool,
+    /// Whether to set rel="external" for all external links
+    pub external_links_external: bool,
     /// Whether smart punctuation is enabled (changing quotes, dashes, dots etc in their typographic form)
     pub smart_punctuation: bool,
-    /// A list of directories to search for additional `.sublime-syntax` and `.tmTheme` files in.
-    pub extra_syntaxes_and_themes: Vec<String>,
-    /// The compiled extra syntaxes into a syntax set
-    #[serde(skip_serializing, skip_deserializing)] // not a typo, 2 are need
-    pub extra_syntax_set: Option<SyntaxSet>,
-    /// The compiled extra themes into a theme set
-    #[serde(skip_serializing, skip_deserializing)] // not a typo, 2 are need
-    pub extra_theme_set: Arc<Option<ThemeSet>>,
+    /// Whether parsing of definition lists is enabled
+    pub definition_list: bool,
+    /// Whether footnotes are rendered at the bottom in the style of GitHub.
+    pub bottom_footnotes: bool,
+    /// Add loading="lazy" decoding="async" to img tags. When turned on, the alt text must be plain text. Defaults to false
+    pub lazy_async_image: bool,
+    /// Whether to insert a link for each header like the ones you can see in this site if you hover one
+    /// The default template can be overridden by creating a `anchor-link.html` in the `templates` directory
+    pub insert_anchor_links: InsertAnchor,
+    /// Whether to enable GitHub-style alerts
+    pub github_alerts: bool,
 }
 
 impl Markdown {
-    /// Gets the configured highlight theme from the THEME_SET or the config's extra_theme_set
-    /// Returns None if the configured highlighting theme is set to use css
-    pub fn get_highlight_theme(&self) -> Option<&Theme> {
-        if self.highlight_theme == "css" {
-            None
-        } else {
-            Some(self.get_highlight_theme_by_name(&self.highlight_theme))
+    pub fn validate_external_links_class(&self) -> Result<()> {
+        // Validate external link class doesn't contain quotes which would break HTML and aren't valid in CSS
+        if let Some(class) = &self.external_links_class
+            && (class.contains('"') || class.contains('\''))
+        {
+            bail!("External link class '{}' cannot contain quotes", class)
         }
-    }
-
-    /// Gets an arbitrary theme from the THEME_SET or the extra_theme_set
-    pub fn get_highlight_theme_by_name(&self, theme_name: &str) -> &Theme {
-        (*self.extra_theme_set)
-            .as_ref()
-            .and_then(|ts| ts.themes.get(theme_name))
-            .unwrap_or_else(|| &THEME_SET.themes[theme_name])
-    }
-
-    /// Attempt to load any extra syntaxes and themes found in the extra_syntaxes_and_themes folders
-    pub fn load_extra_syntaxes_and_highlight_themes(
-        &self,
-        base_path: &Path,
-    ) -> Result<(Option<SyntaxSet>, Option<ThemeSet>)> {
-        if self.extra_syntaxes_and_themes.is_empty() {
-            return Ok((None, None));
-        }
-
-        let mut ss = SyntaxSetBuilder::new();
-        let mut ts = ThemeSet::new();
-        for dir in &self.extra_syntaxes_and_themes {
-            ss.add_from_folder(base_path.join(dir), true)?;
-            ts.add_from_folder(base_path.join(dir))?;
-        }
-        let ss = ss.build();
-
-        Ok((
-            if ss.syntaxes().is_empty() { None } else { Some(ss) },
-            if ts.themes.is_empty() { None } else { Some(ts) },
-        ))
-    }
-
-    pub fn export_theme_css(&self, theme_name: &str) -> String {
-        let theme = self.get_highlight_theme_by_name(theme_name);
-        css_for_theme_with_class_style(theme, CLASS_STYLE)
-    }
-
-    pub fn init_extra_syntaxes_and_highlight_themes(&mut self, path: &Path) -> Result<()> {
-        if self.highlight_theme == "css" {
-            return Ok(());
-        }
-
-        let (loaded_extra_syntaxes, loaded_extra_highlight_themes) =
-            self.load_extra_syntaxes_and_highlight_themes(path)?;
-
-        if let Some(extra_syntax_set) = loaded_extra_syntaxes {
-            self.extra_syntax_set = Some(extra_syntax_set);
-        }
-        if let Some(extra_theme_set) = loaded_extra_highlight_themes {
-            self.extra_theme_set = Arc::new(Some(extra_theme_set));
-        }
-
-        // Validate that the chosen highlight_theme exists in the loaded highlight theme sets
-        if !THEME_SET.themes.contains_key(&self.highlight_theme) {
-            if let Some(extra) = &*self.extra_theme_set {
-                if !extra.themes.contains_key(&self.highlight_theme) {
-                    bail!(
-                        "Highlight theme {} not found in the extra theme set",
-                        self.highlight_theme
-                    )
-                }
-            } else {
-                bail!("Highlight theme {} not available.\n\
-                You can load custom themes by configuring `extra_syntaxes_and_themes` to include a list of folders containing '.tmTheme' files", self.highlight_theme)
-            }
-        }
-
-        // Validate that all exported highlight themes exist as well
-        for theme in self.highlight_themes_css.iter() {
-            let theme_name = &theme.theme;
-            if !THEME_SET.themes.contains_key(theme_name) {
-                // Check extra themes
-                if let Some(extra) = &*self.extra_theme_set {
-                    if !extra.themes.contains_key(theme_name) {
-                        bail!("Can't export highlight theme {}, as it does not exist.\n\
-                        Make sure it's spelled correctly, or your custom .tmTheme' is defined properly.", theme_name)
-                    }
-                }
-            }
-        }
-
         Ok(())
     }
 
@@ -157,12 +183,19 @@ impl Markdown {
         self.external_links_target_blank
             || self.external_links_no_follow
             || self.external_links_no_referrer
+            || self.external_links_external
+            || self.external_links_class.is_some()
     }
 
     pub fn construct_external_link_tag(&self, url: &str, title: &str) -> String {
         let mut rel_opts = Vec::new();
         let mut target = "".to_owned();
         let title = if title.is_empty() { "".to_owned() } else { format!("title=\"{}\" ", title) };
+
+        let class = self
+            .external_links_class
+            .as_ref()
+            .map_or("".to_owned(), |c| format!("class=\"{}\" ", c));
 
         if self.external_links_target_blank {
             // Security risk otherwise
@@ -175,30 +208,35 @@ impl Markdown {
         if self.external_links_no_referrer {
             rel_opts.push("noreferrer");
         }
+        if self.external_links_external {
+            rel_opts.push("external");
+        }
         let rel = if rel_opts.is_empty() {
             "".to_owned()
         } else {
             format!("rel=\"{}\" ", rel_opts.join(" "))
         };
 
-        format!("<a {}{}{}href=\"{}\">", rel, target, title, url)
+        format!("<a {}{}{}{}href=\"{}\">", class, rel, target, title, url)
     }
 }
 
 impl Default for Markdown {
     fn default() -> Markdown {
         Markdown {
-            highlight_code: false,
-            highlight_theme: DEFAULT_HIGHLIGHT_THEME.to_owned(),
-            highlight_themes_css: Vec::new(),
+            highlighting: None,
             render_emoji: false,
+            external_links_class: None,
             external_links_target_blank: false,
             external_links_no_follow: false,
             external_links_no_referrer: false,
+            external_links_external: true,
             smart_punctuation: false,
-            extra_syntaxes_and_themes: vec![],
-            extra_syntax_set: None,
-            extra_theme_set: Arc::new(None),
+            definition_list: false,
+            bottom_footnotes: false,
+            lazy_async_image: false,
+            insert_anchor_links: InsertAnchor::None,
+            github_alerts: false,
         }
     }
 }

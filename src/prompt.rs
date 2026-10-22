@@ -1,10 +1,8 @@
 use std::io::{self, BufRead, Write};
-use std::time::Duration;
 
 use url::Url;
 
-use crate::console;
-use errors::Result;
+use errors::{Result, anyhow};
 
 /// Wait for user input and return what they typed
 fn read_line() -> Result<String> {
@@ -14,7 +12,7 @@ fn read_line() -> Result<String> {
     lines
         .next()
         .and_then(|l| l.ok())
-        .ok_or_else(|| "unable to read from stdin for confirmation".into())
+        .ok_or_else(|| anyhow!("unable to read from stdin for confirmation"))
 }
 
 /// Ask a yes/no question to the user
@@ -28,33 +26,15 @@ pub fn ask_bool(question: &str, default: bool) -> Result<bool> {
         "n" | "N" | "no" | "NO" | "false" => Ok(false),
         "" => Ok(default),
         _ => {
-            println!("Invalid choice: '{}'", input);
+            println!("Invalid choice: '{input}'");
             ask_bool(question, default)
         }
     }
 }
 
-/// Ask a yes/no question to the user with a timeout
-pub async fn ask_bool_timeout(question: &str, default: bool, timeout: Duration) -> Result<bool> {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-
-    let q = question.to_string();
-    std::thread::spawn(move || {
-        tx.send(ask_bool(&q, default)).unwrap();
-    });
-
-    match tokio::time::timeout(timeout, rx).await {
-        Err(_) => {
-            console::warn("\nWaited too long for response.");
-            Ok(default)
-        }
-        Ok(val) => val.expect("Tokio failed to properly execute"),
-    }
-}
-
 /// Ask a question to the user where they can write a URL
 pub fn ask_url(question: &str, default: &str) -> Result<String> {
-    print!("{} ({}): ", question, default);
+    print!("{question} ({default}): ");
     let _ = io::stdout().flush();
     let input = read_line()?;
 
@@ -63,7 +43,7 @@ pub fn ask_url(question: &str, default: &str) -> Result<String> {
         _ => match Url::parse(&input) {
             Ok(_) => Ok(input),
             Err(_) => {
-                println!("Invalid URL: '{}'", input);
+                println!("Invalid URL: '{input}'");
                 ask_url(question, default)
             }
         },

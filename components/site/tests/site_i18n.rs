@@ -1,56 +1,47 @@
 mod common;
 
-use std::env;
-
 use common::*;
 use site::Site;
 
 #[test]
 fn can_parse_multilingual_site() {
-    let mut path = env::current_dir().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
-    path.push("test_site_i18n");
+    let path = test_site_path("test_site_i18n");
     let config_file = path.join("config.toml");
     let mut site = Site::new(&path, &config_file).unwrap();
     site.load().unwrap();
 
-    let library = site.library.read().unwrap();
-    assert_eq!(library.pages().len(), 11);
-    assert_eq!(library.sections().len(), 6);
+    assert_eq!(site.library.pages.len(), 11);
+    assert_eq!(site.library.sections.len(), 6);
 
     // default index sections
     let default_index_section =
-        library.get_section(&path.join("content").join("_index.md")).unwrap();
+        site.library.sections.get(&path.join("content").join("_index.md")).unwrap();
     assert_eq!(default_index_section.pages.len(), 1);
     assert!(default_index_section.ancestors.is_empty());
 
-    let fr_index_section = library.get_section(&path.join("content").join("_index.fr.md")).unwrap();
+    let fr_index_section =
+        site.library.sections.get(&path.join("content").join("_index.fr.md")).unwrap();
     assert_eq!(fr_index_section.pages.len(), 1);
     assert!(fr_index_section.ancestors.is_empty());
 
     // blog sections get only their own language pages
     let blog_path = path.join("content").join("blog");
 
-    let default_blog = library.get_section(&blog_path.join("_index.md")).unwrap();
+    let default_blog = site.library.sections.get(&blog_path.join("_index.md")).unwrap();
     assert_eq!(default_blog.subsections.len(), 0);
     assert_eq!(default_blog.pages.len(), 4);
-    assert_eq!(
-        default_blog.ancestors,
-        vec![*library.get_section_key(&default_index_section.file.path).unwrap()]
-    );
+    assert_eq!(default_blog.ancestors, vec![default_index_section.file.relative.clone()]);
     for key in &default_blog.pages {
-        let page = library.get_page_by_key(*key);
+        let page = &site.library.pages[key];
         assert_eq!(page.lang, "en");
     }
 
-    let fr_blog = library.get_section(&blog_path.join("_index.fr.md")).unwrap();
+    let fr_blog = site.library.sections.get(&blog_path.join("_index.fr.md")).unwrap();
     assert_eq!(fr_blog.subsections.len(), 0);
-    assert_eq!(fr_blog.pages.len(), 3);
-    assert_eq!(
-        fr_blog.ancestors,
-        vec![*library.get_section_key(&fr_index_section.file.path).unwrap()]
-    );
+    assert_eq!(fr_blog.pages.len(), 4);
+    assert_eq!(fr_blog.ancestors, vec![fr_index_section.file.relative.clone()]);
     for key in &fr_blog.pages {
-        let page = library.get_page_by_key(*key);
+        let page = &site.library.pages[key];
         assert_eq!(page.lang, "fr");
     }
 }
@@ -125,7 +116,10 @@ fn can_build_multilingual_site() {
         "atom.xml",
         r#"<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en">"#
     ));
+    assert!(file_contains!(public, "atom.xml", "<id>https://example.com/atom.xml</id>"));
     assert!(file_exists!(public, "fr/atom.xml"));
+    // each language's feed links to itself, not to the default language one
+    assert!(file_contains!(public, "fr/atom.xml", "<id>https://example.com/fr/atom.xml</id>"));
     assert!(!file_contains!(public, "fr/atom.xml", "https://example.com/blog/something-else/"));
     assert!(file_contains!(public, "fr/atom.xml", "https://example.com/fr/blog/something-else/"));
     assert!(file_contains!(
@@ -163,14 +157,43 @@ fn can_build_multilingual_site() {
     assert!(file_exists!(public, "fr/auteurs/index.html"));
     assert!(!file_contains!(public, "fr/auteurs/index.html", "Queen"));
     assert!(file_contains!(public, "fr/auteurs/index.html", "Vincent"));
-    assert!(!file_exists!(public, "fr/auteurs/vincent-prouillet/atom.xml"));
+    assert!(file_exists!(public, "fr/auteurs/vincent-prouillet/atom.xml"));
+    assert!(file_contains!(
+        public,
+        "fr/auteurs/vincent-prouillet/atom.xml",
+        r#"<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="fr">"#
+    ));
 
     assert!(file_exists!(public, "fr/tags/index.html"));
     assert!(file_contains!(public, "fr/tags/index.html", "bonjour"));
     assert!(!file_contains!(public, "fr/tags/index.html", "hello"));
 
+    // sitemap contains per-language taxonomies
+    assert!(file_contains!(public, "sitemap.xml", "https://example.com/tags/"));
+    assert!(file_contains!(public, "sitemap.xml", "https://example.com/tags/hello/"));
+    assert!(file_contains!(public, "sitemap.xml", "https://example.com/fr/tags/"));
+    assert!(file_contains!(public, "sitemap.xml", "https://example.com/fr/tags/bonjour/"));
+
+    assert!(!file_contains!(public, "sitemap.xml", "https://example.com/tags/bonjour"));
+
     // one lang index per language
     assert!(file_exists!(public, "search_index.en.js"));
+    assert!(file_exists!(public, "search_index.it.js"));
+    assert!(!file_exists!(public, "search_index.fr.js"));
+}
+
+// https://github.com/getzola/zola/issues/2689
+#[test]
+fn can_build_search_index_for_non_default_language_only() {
+    let (_, _tmp_dir, public) = build_site_with_setup("test_site_i18n", |mut site| {
+        site.config.build_search_index = false;
+        if let Some(en) = site.config.languages.get_mut("en") {
+            en.build_search_index = false;
+        }
+        (site, true)
+    });
+
+    assert!(!file_exists!(public, "search_index.en.js"));
     assert!(file_exists!(public, "search_index.it.js"));
     assert!(!file_exists!(public, "search_index.fr.js"));
 }
@@ -188,6 +211,7 @@ fn correct_translations_on_all_pages() {
         let link = format!("{}index.html", link);
 
         // Ensure every permalink has produced a HTML page
+        println!("{:?}", link);
         assert!(ensure_output_exists(&public, &site.config.base_url, &link));
 
         // Ensure translations expected here match with those in the library
@@ -197,4 +221,31 @@ fn correct_translations_on_all_pages() {
         // Ensure output file contains all translations URLs
         assert!(ensure_translations_in_output(&site, path, &link));
     }
+}
+
+#[test]
+fn can_resolve_colocated_assets_language_aware() {
+    let (_, _tmp_dir, public) = build_site("test_site_i18n");
+
+    assert!(file_contains!(
+        public,
+        "blog/with-assets/index.html",
+        "en asset: https://example.com/blog/with-assets/some.js"
+    ));
+    assert!(file_contains!(
+        public,
+        "fr/blog/with-assets/index.html",
+        "fr asset: https://example.com/fr/blog/with-assets/some.js"
+    ));
+
+    assert!(file_contains!(
+        public,
+        "blog/with-assets/index.html",
+        "src=\"https://example.com/blog/with-assets/some.js\""
+    ));
+    assert!(file_contains!(
+        public,
+        "fr/blog/with-assets/index.html",
+        "src=\"https://example.com/fr/blog/with-assets/some.js\""
+    ));
 }

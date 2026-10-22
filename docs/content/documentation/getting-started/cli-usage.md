@@ -11,7 +11,7 @@ that for a specific command by running `zola <cmd> --help`.
 ## init
 
 Creates the directory structure used by Zola at the given directory after asking a few basic configuration questions.
-Any choices made during these prompts can be easily changed by modifying `config.toml`.
+Any choices made during these prompts can be easily changed by modifying `zola.toml`.
 
 ```bash
 $ zola init my_site
@@ -46,13 +46,13 @@ $ zola build --base-url $DEPLOY_URL
 This is useful for example when you want to deploy previews of a site to a dynamic URL, such as Netlify
 deploy previews.
 
-You can override the default output directory `public` by passing another value to the `output-dir` flag (if this directory already exists, the user will be prompted whether to replace the folder).
+You can override the default output directory `public` by passing another value to the `output-dir` flag. If this directory already exists, the user will be prompted whether to replace the folder; you can override this prompt by passing the --force flag.
 
 ```bash
 $ zola build --output-dir $DOCUMENT_ROOT
 ```
 
-You can point to a config file other than `config.toml` like so (note that the position of the `config` option is important):
+You can point to a config file other than `zola.toml` like so (note that the position of the `config` option is important):
 
 ```bash
 $ zola --config config.staging.toml build
@@ -74,12 +74,14 @@ You can also specify different addresses for the interface and base_url using `-
 
 > By default, devices from the local network **won't** be able to access the served pages. This may be of importance when you want to test page interaction and layout on your mobile device or tablet. If you set the interface to `0.0.0.0` however, devices from your local network will be able to access the served pages by requesting the local ip-address of the machine serving the pages and port used.
 >
-> In order to have everything work correctly, you might also have to alter the `base-url` flag to your local ip.
+> In order to have everything work correctly, you might also have to alter the `base-url` flag to your local ip or set it to `/` to use server-base relative paths.
 
 Use the `--open` flag to automatically open the locally hosted instance in your
 web browser.
 
 Before starting, Zola will delete the output directory (by default `public` in project root) to start from a clean slate.
+
+If you are specifying the directory but are also using the `output-dir` flag, Zola will not use the specified directory if it already exists unless the --force flag is used.
 
 ```bash
 $ zola serve
@@ -87,6 +89,7 @@ $ zola serve --port 2000
 $ zola serve --interface 0.0.0.0
 $ zola serve --interface 0.0.0.0 --port 2000
 $ zola serve --interface 0.0.0.0 --base-url 127.0.0.1
+$ zola serve --interface 0.0.0.0 --base-url /
 $ zola serve --interface 0.0.0.0 --port 2000 --output-dir www/public
 $ zola serve --open
 ```
@@ -97,7 +100,14 @@ a hard refresh if possible. If you are using WSL2 on Windows, make sure to store
 Some changes cannot be handled automatically and thus live reload may not always work. If you
 fail to see your change or get an error, try restarting `zola serve`.
 
-You can also point to a config file other than `config.toml` like so (note that the position of the `config` option is important):
+By default, the live reload will be debounced by one full second so as to more
+gracefully handle multiple changes to your input files in rapid succession. You
+have control over that debouncing duration with the `--debounce <duration_ms>`
+flag.  
+You may use `-d1` to (virtually) disable it altogether: for technical reasons
+(and keeping things simple), a "debounce" of 0 is not supported.
+
+You can also point to a config file other than `zola.toml` like so (note that the position of the `config` option is important):
 
 ```bash
 $ zola --config config.staging.toml serve
@@ -110,6 +120,8 @@ By default, drafts are not loaded. If you wish to include them, pass the `--draf
 The check subcommand will try to build all pages just like the build command would, but without writing any of the
 results to disk. Additionally, it will also check all external links in Markdown files by trying to fetch
 them (links in the template files are not checked).
+
+You can skip link checking for all the external links by `--skip-external-links` flag.
 
 By default, drafts are not loaded. If you wish to include them, pass the `--drafts` flag.
 
@@ -127,3 +139,13 @@ You can disable this behavior by exporting one of the following two environment 
 To force the use of colors, you can set the following environment variable:
 
 - `CLICOLOR_FORCE=1`
+
+## Extra information
+
+Zola can provide detailed logging about its behavior via the `RUST_LOG` variable:
+
+- To see timing information from Zola, set `RUST_LOG=zola=info,site=debug`.
+- To see debug information, set `RUST_LOG=debug`. *Note*: The output will be **very noisy**, use with caution.
+- To disable all log output entirely, set `RUST_LOG=off`.
+
+See the [env_logger documentation](https://docs.rs/env_logger/0.11.8/env_logger/#enabling-logging) for a full reference on `RUST_LOG`.

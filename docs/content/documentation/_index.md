@@ -7,13 +7,12 @@ Getting started
  - Installation
  - CLI usage
  - Directory structure
- - config.toml
+ - zola.toml
  
 Content
  - Organisation
  - Sections
  - Pages
- - Shortcodes
  - Internal links & deep linking
  - Table of contents
  - Syntax highlighting

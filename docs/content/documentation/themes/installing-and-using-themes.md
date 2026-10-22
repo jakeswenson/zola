@@ -7,11 +7,11 @@ weight = 20
 ## Installing a theme
 
 The easiest way to install a theme is to clone its repository in the `themes`
-directory.
+directory:
 
 ```bash
 $ cd themes
-$ git clone THEME_REPO_URL
+$ git clone <theme repository URL>
 ```
 
 Cloning the repository using Git or another VCS will allow you to easily
@@ -29,6 +29,7 @@ name has to be the name of the directory you cloned the theme in.
 For example, if you cloned a theme in `themes/simple-blog`, the theme name to use
 in the configuration file is `simple-blog`. Also make sure to place the variable in the top level of the 
 `.toml` hierarchy and not after a dict like [extra] or [markdown].
+Some themes require additional configuration before they can work properly. Be sure to follow the instructions found on your chosen theme's documentation to properly configure the theme. 
 
 ## Customizing a theme
 
@@ -44,18 +45,20 @@ static/js/site.js -> replace themes/simple-blog/static/js/site.js
 You can also choose to only override parts of a page if a theme defines some blocks by extending it. If we wanted
 to only change a single block from the `post.html` page in the example above, we could do the following:
 
-```
+```jinja
+{% raw -%}
 {% extends "simple-blog/templates/pages/post.html" %}
 
 {% block some_block %}
 Some custom data
 {% endblock %}
+{%- endraw %}
 ```
 
 Most themes will also provide some variables that are meant to be overridden. This happens in the `extra` section
 of the [configuration file](@/documentation/getting-started/configuration.md).
 Let's say a theme uses a `show_twitter` variable and sets it to `false` by default. If you want to set it to `true`,
-you can update your `config.toml` like so:
+you can update your `zola.toml` like so:
 
 ```toml
 [extra]

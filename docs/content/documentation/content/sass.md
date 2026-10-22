@@ -11,7 +11,13 @@ may be of interest:
 * The [official Sass website](https://sass-lang.com/)
 * [Why Sass?](https://alistapart.com/article/why-sass), by Dan Cederholm
 
+It currently uses [grass](https://github.com/connorskees/grass), a Rust implementation of Sass roughly equivalent
+with dart-sass.
+
 ## Using Sass in Zola
+
+Zola always compiles Sass files in theme directories.
+However, for Zola to process files in the `sass` folder, you need to set `compile_sass = true` in your `zola.toml`.
 
 Zola processes any files with the `sass` or `scss` extension in the `sass`
 folder, and places the processed output into a `css` file with the same folder

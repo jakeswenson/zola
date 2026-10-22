@@ -1,5 +1,409 @@
 # Changelog
 
+## 0.23.6 (2026-09-12)
+
+- Update tera version to support component implicit params
+
+## 0.23.5 (2026-09-11)
+
+- Fix `text_direction` not being wired up correctly and causing compilation errors when used in templates
+- Fix `get_taxonomy_url` in templated content not finding anything
+- Fix `get_taxonomy`, `get_taxonomy_term` and `get_taxonomy_url` not finding taxonomies via names if they differ when slugified
+- Update tera, adding back `locale` param to the `date` filter
+- Fix dark borders around PNG when resizing images
+- Cache results of `get_hash`
+- Rebuild whole site on any template change in `zola serve`, a smarter reload will come later
+
+## 0.23.4 (2026-08-20)
+
+- Fix another `get_url` bug adding a trailing slash for non default language
+- Fix `index.<default_language>.md` paths collision
+- Fix sitemap `<lastmod>` emitting invalid dates (eg a datetime without a timezone) for sitemap validation
+- Fix `get_url` returning links to pages/sections with `render = false`
+- Various fixes with `zola serve` -u/-i flags
+- Date sorting is now using descending permalink as tie breaker instead of ascending to match date sorting
+- Cache result of `get_url(..., cachebust=true)`
+- Do not error when setting heading ids in content with a Tera error
+- Properly merge taxonomies terms when needed after slugification
+
+## 0.23.3 (2026-08-11)
+
+- Fix Windows issues
+- Fix panic in section templating
+- Fix feed URL for non-default languages
+- Fix colocated assets for sections not being copied in some cases
+- Fix config merge errors with multilingual sites
+- Now error when taxonomies terms slugify to an empty string
+- Fix language region (eg en-US, zh-Hans) for elasticlunr search backend 
+- Fix search language generation for languages not working if default lang search is disabled
+
+
+## 0.23.2 (2026-08-07)
+
+- Fix dual class CSS generation
+- Fix `data_attr_position` values not being lowercased
+- Fix footnotes not being permalinked
+- Add back `get_env` function
+
+## 0.23.1 (2026-08-05)
+
+- Fix docker images missing certificates
+
+## 0.23.0 (2026-08-05)
+
+This is probably the most breaking version of Zola that will happen. 
+Depending on how you use it though, it might not be too long to migrate. It took about 20 minutes to upgrade the Zola docs
+and it was mostly because it contains a lot of Tera syntax (as we will see later).
+
+### Breaking
+
+- remove `native-tls` feature to build zola
+- `get_page` and `get_section` no longer work with paths containing language code, eg "content/some.fr.md". Use the canonical path + `lang` argument
+- Tera, the template engine, has been updated to v2. See its own migration guide: <https://github.com/Keats/tera/blob/master/MIGRATION.md>
+- shortcodes have been removed, see Migration section below for more details
+
+#### Migration
+
+As mentioned, shortcodes have been completely removed.
+Instead, you can now completely template the content of a page/section from the .md file, as well as use the new Tera
+components. No more weird separation of shortcode/macros, just use Tera, the same components you can use elsewhere in your site.
+This means you will need to rewrite your shortcodes into components most likely, see [Tera documentation](https://keats.github.io/tera/#components) for
+more details.
+
+For example, a macro before 0.22:
+
+```jinja2
+{# templates/macros.html #}
+{% macro youtube(id, autoplay=false) %}
+<iframe src="https://www.youtube.com/embed/{{ id }}{% if autoplay %}?autoplay=1{% endif %}"></iframe>
+{% endmacro youtube %}
+
+{# in a template #}
+{% import "macros.html" as macros %}
+{{ macros::youtube(id="dQw4w9WgXcQ", autoplay=true) }}
+```
+
+becomes this component after 0.23:
+
+```jinja2
+{# in any template file, eg templates/components.html #}
+{% component youtube(id, autoplay=false) %}
+<iframe src="https://www.youtube.com/embed/{{ id }}{% if autoplay %}?autoplay=1{% endif %}"></iframe>
+{% endcomponent youtube %}
+
+{# in a template or in markdown content, no import needed #}
+{{ <youtube id="dQw4w9WgXcQ" autoplay={true} /> }}
+```
+
+And a shortcode taking a body:
+
+```md
+{% quote(author="Vincent") %}
+A quote
+{% end %}
+```
+
+becomes a component invoked with the block syntax, the body being available as the `body` variable inside it:
+
+```jinja2
+{# in any template file, eg templates/components.html #}
+{% component quote(author) %}
+<blockquote>{{ body }}<footer>{{ author }}</footer></blockquote>
+{% endcomponent quote %}
+
+{# in markdown content (or in a normal template) #}
+{% <quote author="Vincent"> %}
+A quote
+{% </quote> %}
+```
+
+Components are hygienic and only have access to the parameters you pass explicitly, eg if you need `lang` you have to pass 
+it as a parameter.
+
+If you use a theme, it will most likely need to be updated to work with Zola 0.23 before you can update.
+
+Follow the Tera migration guide (<https://github.com/Keats/tera/blob/master/MIGRATION.md>) for the changes in the template itself.
+
+If you have Tera syntax in your content, you will need to wrap it in `{% raw %}..{% endraw %}` to avoid errors.
+
+There is also a new config option, `skip_content_templating` to skip templating for some of the files.
+
+### Other
+
+- `get_taxonomy_url` `name` parameter is deprecated. Use `term` to be consistent with the other functions
+- Add an optional `filter` argument to `resize_image` to choose the sampling filter
+- Add `data_attr_position` to the markdown highlighting config to handle where all the data attributes should be passed
+- Syntax highlighting CSS themes are now generated in the output directory, not in `static`
+- Use language-specific reading speeds for reading_time
+- Fix LiveReload with IPv6 loopback
+- Sections now also have `higher`/`lower` for their subsections, like pages do.
+- `@/` internal links can now resolve colocated assets, both in `get_url` (eg `get_url(path="@/blog/article/img.png")`) and in markdown content links/images (eg `![](@/blog/article/img.png)`)
+- Add `hidden` property to pages and section to avoid including them in sections/subsections
+- Expose aliases in templates
+- Add `allow_missing` parameter for `get_page` and `get_section` to not error if the requested thing is missing
+- Add `text_direction` Tera function
+- Use language specific reading time for the `reading_time` attribute
+- Add more fields to the output of `get_image_metadata`: `description` and `created`.
+- Add `include_in_feeds` in the page front-matter to exclude them from feeds if needed
+
+## 0.22.1 (2026-01-22)
+
+- Update deps to fix some JPEG decoding issue + highlighting speed
+- Make sure all content is included in fuse search backend
+
+## 0.22.0 (2026-01-09)
+
+### Breaking
+Syntect has been replaced with [Giallo](https://github.com/getzola/giallo) and all the highlighting options
+of the `markdown` section in the config file have been moved/changed in `[markdown.highlighting]`.
+
+The themes are different so you will need to find something you like from <https://textmate-grammars-themes.netlify.app/>.
+
+Migration:
+
+**Single theme:**
+```toml
+# Before
+[markdown]
+highlight_code = true
+highlight_theme = "base16-ocean-dark"
+
+# Now
+[markdown.highlighting]
+theme = "gruvbox-dark"
+```
+
+**Class output:**
+```toml
+# Before
+[markdown]
+highlight_code = true
+highlight_theme = "css"
+highlight_themes_css = [
+  { theme = "base16-ocean-dark", filename = "syntax-theme-dark.css" },
+  { theme = "base16-ocean-light", filename = "syntax-theme-light.css" },
+]
+
+# Now
+[markdown.highlighting]
+theme = "gruvbox-dark"
+style = "class"
+```
+
+For more information on how to handle light/dark themes as well as details about CSS generation and required CSS, 
+see the [documentation](https://www.getzola.org/documentation/content/syntax-highlighting/).
+
+Some grammar names have changed as well, I recommend to set up the following:
+
+```toml
+[markdown.highlighting]
+error_on_missing_language = true
+```
+
+### Other
+
+- Try to preserve ICC color profile when processing images
+- Fix link checking timeout
+- Generate man pages at build time
+- `zola serve` websockets now listen to the same port as HTTP
+- Add proper logging; log output can be controlled with `RUST_LOG` environment variable
+- Remove `ZOLA_PERF_LOG` environment variable; set `RUST_LOG=site=debug,zola=info` instead
+- Licence changed to EUPL 1.2
+
+## 0.21.0 (2025-07-14)
+
+- Allow `github_alerts` at config.toml level
+- Add a `copy` attribute that can be set on codeblocks to set data-copy on them
+- Empty feeds are now generated
+- Preserve the hash part of the URL for alias redirection
+- Add a new permalink sorting strategy for pages
+- Better support for port 0 for zola serve
+- Better AVIF support
+- Add Korean language support for search generation
+- Allow .json and .ics custom feeds
+- Fix footnotes semantic organization for accessibility
+- Adjust image metadata based on exif orientation data
+- Add a `zola_version` variable to the pages context
+
+## 0.20.0 (2025-02-14)
+
+- Add `name` annotation for codeblock
+- Add argument to `zola serve` to watch additional directories
+- Disable JS minification when minifying HTML, it can result in broken JS
+- Add external links class option to Markdown configuration
+- Improve accessibility by nesting bottom footnotes inside footer element
+- Add pagination info to sections
+- Exclude paginated pages in sitemap by default
+- Allow treating a missing highlight language as error
+- Handle more editors with change detection in `zola serve`
+- Add argument to `zola serve` to write HTML files to disk (`--store-html`)
+- Add optional parsing of Markdown definition lists
+- Add avif support to the `resize_image` filter
+- Allow `insert_anchor_links` at config.toml level
+
+
+## 0.19.2 (2024-08-15)
+
+- Fix some of YAML date parsing
+- Fix feed generation for languages not working in some cases (it was taking the value from the root of the config for
+feed_filenames)
+- Ignore `.bck` files in `zola serve`
+- Fix change monitoring on Windows
+- Allow disabling sitemap.xml and robots.txt generation
+- Fix shortcodes in inline HTML
+- Ignore code blocks in word count
+
+## 0.19.1 (2024-06-24)
+
+- Fix `config.generate_feeds` being still serialized as `config.generate_feed`. Both are available for now
+- Fix `zola serve` not reacting to changes on some OSes
+
+## 0.19.0 (2024-06-20)
+
+### Breaking
+
+- Changed config options named `generate_feed` to `generate_feeds` (both in config.toml and in section front-matter)
+- Changed config option `feed_filename: String` to `feed_filenames: Vec<String>`
+
+### Other
+
+- Updates the pulldown-cmark dependency to v0.11.0. This improves footnote handling, and may also introduce some minor behavior changes such as reducing the amount of unnecessary HTML-escaping of text content.
+- Add bottom footnotes with backreference option
+- Fix link check report inconsistency
+- Fix resizing for images with EXIF orientation
+- Add MIME type to get_image_metadata
+- Fix hot loading for config.toml in some cases
+- Add `render = false` capability to pages
+- Handle string dates in YAML front-matter
+- Add support for fuse.js search format
+- Added support for generating multiple kinds of feeds at once
+- The config file no longer allows arbitrary fields outside the `[extra]` section
+
+## 0.18.0 (2023-12-18)
+
+- Fix LFI in `zola serve`
+- Do not panic when root directory or config file not found
+- Fix base_url link attributes in atom templates
+- Use all authors for atom templates
+- Always sort page/section assets by filename
+- Allow setting attributes to lazy load all images from Config.toml
+- Fix HTML generated in class based highlighting with line numbers
+- Add a `replace_re` filter
+- Speed up `zola check` and only checks external links once, even if present in multiple languages
+- Add `search.index_format` into the serialized config in the templates
+- Add --force flag in `zola serve` if the directory is not empty
+- Add `ignored_static` to the config to ignore specific files from the static directory
+- Add Hungarian support for search
+- Actually remove codeblocks from search index
+- Fix taxonomies missing lang in sitemap
+
+## 0.17.2 (2023-03-19)
+
+- Fix one more invalid error with colocated directories
+- Revert "Recognize links starting with `www` as external for the link checker" as they won't be external links in practice
+- Use page.summary for atom.xml if available
+- Fix cachebusting not working with binary files
+- Fix warning message for multilingual sites
+
+## 0.17.1 (2023-02-24)
+
+- Fix bugs with colocated directories in the root `content` directory
+- Fix `zola serve` not  respecting `preserve_dotfiles_in_output`
+- Add `generate_feed` field to the `section` object in templates
+
+## 0.17.0 (2023-02-16)
+
+### Breaking
+- `get_file_hash` is removed, use `get_hash` instead. Arguments do not change
+- Replace libsass by a Rust implementation: [grass](https://github.com/connorskees/grass). See https://sass-lang.com/documentation/breaking-changes
+for breaking changes with libsass: look for "beginning in Dart Sass"
+- Merge settings for the default language set in the root of `config.toml` and in the `[languages.{default_lang}]` section. 
+This will error if the same keys are defined multiple times
+- Code blocks content are no longer included in the search index
+- Remove built-ins shortcodes
+- Having a file called `index.md` in a folder with a `_index.md` is now an error
+- Ignore temp files from vim/emacs/macos/etc as well as files without extensions when getting colocated assets
+- Now integrates the file stem of the original file into the processed images filename: {stem}.{hash}.{extension}
+
+### Other
+
+- Add `get_taxonomy_term` function
+- Add `slugify.paths_keep_dates` option
+- Add command to generate shell completions
+- Fix link generation to co-located assets other than images
+- Add `get_hash` Tera function
+- Minify CSS and JS embedded in HTML
+- Fix slow image processing
+- Fix `current_url` in taxonomy term
+- Add new flag `zola serve --no_port_append` to give the ability to remove port from base url
+- `config.markdown` is now available in templates
+- Add `preserve_dotfiles_in_output` option in the config
+- Add Elasticlunr JSON output for the search index
+- Add sorting by slug for pages
+- Enable locale date formatting for the Tera `date` filter
+- Cachebust fingerprint is now only 20 chars long
+- Add `text` alias for plain text highlighting (before, only `txt` was used)
+- Adds a new field to `page`: `colocated_path` that points to the folder of the current file being rendered if it's a colocated folder. None otherwise.
+- Add `author` as a first-class property to the config and `authors` to pages
+- Allows using external URL for `redirect_to`
+- Recognize links starting with `www` as external for the link checker
+
+## 0.16.1 (2022-08-14)
+
+- Fix many Windows bugs
+- Fix overriding built-in shortcodes
+- Support .yml files with `load_data`
+
+## 0.16.0 (2022-07-16)
+
+### Breaking
+
+- Switch to pulldown-cmark anchor system rather than ours, some (very niche) edge cases are not supported anymore, you can
+also specify classes on headers now
+- Now outputs empty taxonomies instead of ignoring them
+- Unify all pages sorting variable names in templates to `lower`/`higher` in order to make it easy to re-use templates and it
+was becoming hard to come up with names to be honest
+
+### Other
+- Fix markup for fenced code with linenos
+- Make `ignored_content` work with nested paths and directories
+- `zola serve/build` can now run from anywhere in a zola directory
+- Add XML support to `load_data`
+- Add YAML support to `load_data`
+- `skip_prefixes` is now checked before parsing external link URLs
+- Add `render` attribute to taxonomies configuration in `config.toml`, for when you don't want to render
+any pages related to that taxonomy
+- Serialize `transparent` field from front-matter of sections
+- Use Zola Tera instance for markdown filter: this means you have access to the same Tera functions as in shortcodes
+- Ignore sections with `render=false` when looking for path collisions
+- Add support for backlinks
+- Add a warning mode for internal/external link checking in case you don't want zola to stop the build on invalid links
+- Always follow symlinks when loading the site/assets
+- Add `rel="alternate"` to Atom post links
+- Fix taxonomy `current_path`
+- Fix feed location for taxonomies not in the default language
+- Add `title_bytes` sorting method
+- Add `insert_anchor = "heading"`, which allows users to use the entire heading as a link
+- Apply orientation transformation based on EXIF data
+- Fix generated homepages not having their `translations` filled properly
+
+## 0.15.3 (2022-01-23)
+
+- Fix shortcodes not being rendered in code blocks
+- Fix colocated assets with no extensions being ignored
+- Add `headers` parameters to `load_data`
+- Fix themes `robots.txt` not being rendered
+- Check for local internal anchors in HTML content of markdown files
+- Fix issues loading custom syntaxes if highlight_theme = css
+
+## 0.15.2 (2021-12-10)
+
+- Fix HTML shortcodes
+
+## 0.15.1 (2021-12-08)
+
+- Fix markdown shortcodes not being rendered correctly
+- Fix config data not getting to the templates
 
 ## 0.15.0 (2021-12-05)
 
@@ -212,7 +616,7 @@ accessible everywhere
 ### Other
 
 - Fix image processing not happening if called from the template
-- Add a `zola check` command to that validates the site and checks all external links
+- Add a `zola check` command that validates the site and checks all external links
 - Sections can have `aliases` as well
 - Anchors in internal links are now checked for existence
 
@@ -230,7 +634,7 @@ accessible everywhere
 ### Breaking
 - `earlier/later` and `lighter/heavier` are not set anymore on pages when rendering
 a section
-- The table of content for a page/section is now only available as the `toc` variable when
+- The table of contents for a page/section is now only available as the `toc` variable when
 rendering it and not anymore on the `page`/`section` variable
 - Default directory for `load_data` is now the root of the site instead of the `content` directory
 - Change variable sent to the sitemap template, see documentation for details
@@ -269,7 +673,7 @@ or the extension matches csv/toml/json
 - The `pagers` variable of Paginator objects has been removed
 - `section.subsections` is now an array of paths to be used with the `get_section`
 Tera function
-- Table of content now strips HTML from the titles to avoid various issues
+- Table of contents now strips HTML from the titles to avoid various issues
 - `gutenberg-anchor` CSS class has been renamed `zola-anchor`
 - `data` is now a reserved variable name in templates, it is unused right now but
 might change soon.
@@ -300,13 +704,13 @@ sections up to the index to be used with the `get_section` Tera function
 - `serve` will now try to find other ports than 1111 rather than panicking
 - Ensure content directory exists before rendering aliases
 - Do not include drafts in pagination
-- Pages filenames starting by a date will now use that date as page date if there isn't one defined in frontmatter
+- Pages filenames starting by a date will now use that date as page date if there isn't one defined in front-matter
 - Accept markdown files starting with BOM
 - Add a `watch-only` flag to the `serve` command for when you don't want a webserver
 - Add `transparent` sections, for when you want to separate content by sections but want to group them at a higher level (think a `posts` folder with years
 that want to use pagination on the index).
 - Add `page_template` to section front-matter for when you want to specify the template to use for every page under it
-- Improves to `zola serve`: now handles directories renaming
+- Improvements to `zola serve`: now handles directories renaming
 
 ## 0.4.2 (2018-09-03)
 
@@ -363,7 +767,7 @@ to the public directory
 - Gutenberg now creates an anchor link at the position of the `<!-- more -->` tag if you
 want to link directly to it
 - Fix many shortcode parsing issues
-- Correctly copy themes shortcodes so they are useable in content
+- Correctly copy themes shortcodes so they are usable in content
 - Fix internal links not working for markdown files directly in `content` directory
 
 ## 0.3.2 (2018-03-05)
@@ -395,7 +799,7 @@ For example: `date = "2001-10-10"` becomes `date = 2001-10-10`
 - Add Prolog syntax highlighting and update all current syntaxes
 - Live reloading now works on shortcode template changes
 - `gutenberg serve` now reloads site on `config.toml` changes: you will need to F5 to see any changes though
-- Add a `trans` global function that will get return the translation of the given key for the given lang, defaulting
+- Add a `trans` global function that will return the translation of the given key for the given lang, defaulting
 to `config.default_language` if not given
 - `gutenberg serve` cleans after itself and deletes the output directory on CTRL+C
 

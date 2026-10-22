@@ -3,15 +3,17 @@ title = "Overview"
 weight = 10
 +++
 
-Zola uses the [Tera](https://tera.netlify.com) template engine, which is very similar
+Zola uses the [Tera](https://keats.github.io/tera) template engine, which is very similar
 to Jinja2, Liquid and Twig.
 
+The current Zola version (0.22 and before) use Tera v1. The documentation for Tera v1 is available there: <https://github.com/Keats/tera/blob/v1/docs/content/docs/_index.md>
+
 As this documentation will only talk about how templates work in Zola, please read
-the [Tera template documentation](https://tera.netlify.com/docs#templates) if you want
+the [Tera template documentation](https://keats.github.io/tera/#templates) if you want
 to learn more about it first.
 
 All templates live in the `templates` directory.  If you are not sure what variables are available in a template,
-you can place `{{ __tera_context }}` in the template to print the whole context.
+you can place `{% raw %}{{ __tera_context }}{% endraw %}` in the template to print the whole context.
 
 A few variables are available on all templates except feeds and the sitemap:
 
@@ -20,7 +22,7 @@ A few variables are available on all templates except feeds and the sitemap:
 - `current_url`: the full URL for the current page
 - `lang`: the language for the current page
 
-Config variables can be accessed like `config.variable`, in HTML for example with `{{ config.base_url }}`.
+Config variables can be accessed like `config.variable`, in HTML for example with `{% raw %}{{ config.base_url }}{% endraw %}`.
 The 404 template does not get `current_path` and `current_url` (this information cannot be determined).
 
 On top of the `config` attributes mentioned above, it also gets `config.mode` which is whether it's run in `build`, `serve` or `check`.
@@ -49,7 +51,9 @@ creating a `templates/atom.xml` file.
 ## Custom templates
 In addition to the standard `index.html`, `section.html` and `page.html` templates,
 you may also create custom templates by creating an `.html` file in the `templates`
-directory.  These custom templates will not be used by default.  Instead, a custom template will _only_ be used if you apply it by setting the `template` front-matter variable to the path for that template (or if you `include` it in another template that is applied).  For example, if you created a custom template for your site's About page called `about.html`, you could apply it to your `about.md` page by including the following front matter in your `about.md` page:
+directory.  These custom templates will not be used by default. 
+Instead, a custom template will _only_ be used if you apply it by setting the `template` front-matter variable to the path for that template (or if you `include` it in another template that is applied). 
+For example, if you created a custom template for your site's About page called `about.html`, you could apply it to your `about.md` page by including the following front matter in your `about.md` page:
 
 ```md
 +++
@@ -62,20 +66,19 @@ Custom templates are not required to live at the root of your `templates` direct
 For example, `product_pages/with_pictures.html` is a valid template.
 
 ## Built-in filters
-Zola adds a few filters in addition to [those](https://tera.netlify.com/docs/#filters) already present
+Zola adds a few filters in addition to [those](https://keats.github.io/tera/#filters) already present
 in Tera.
 
 ### markdown
-Converts the given variable to HTML using Markdown. There are a few differences compared to page/section Markdown rendering:
-
-- shortcodes evaluated by this filter cannot access the current rendering context: `config` will be available, but accessing `section` or `page` (among others) from a shortcode called within the `markdown` filter will prevent your site from building (see [this discussion](https://github.com/getzola/zola/pull/1358))
-- `lang` in shortcodes will always be equal to the site's `default_lang` (or `en` otherwise) ; it should not be a problem, but if it is in most cases, but if you need to use language-aware shortcodes in this filter, please refer to the [Shortcode context](@/documentation/content/shortcodes.md#shortcode-context) section of the docs.
+Converts the given variable to HTML using Markdown.
 
 By default, the filter will wrap all text in a paragraph. To disable this behaviour, you can
 pass `true` to the inline argument:
 
-```jinja2
+```jinja
+{% raw -%}
 {{ some_text | markdown(inline=true) }}
+{%- endraw %}
 ```
 
 You do not need to use this filter with `page.content` or `section.content`, the content is already rendered.
@@ -86,40 +89,54 @@ Encode the variable to base64.
 ### base64_decode
 Decode the variable from base64.
 
+### regex_replace
+Replace text via regular expressions.
+
+```jinja
+{% raw -%}
+{{ "World Hello" | regex_replace(pattern=`(?P<subject>\w+), (?P<greeting>\w+)`, rep=`$greeting $subject`) }}
+<!-- Hello World -->
+{%- endraw %}
+```
+
 ### num_format
 Format a number into its string representation.
 
-```jinja2
+```jinja
+{% raw -%}
 {{ 1000000 | num_format }}
 <!-- 1,000,000 -->
+{%- endraw %}
 ```
 
-By default this will format the number using the locale set by `config.default_language` in config.toml.
+By default this will format the number using the locale set by `config.default_language` in zola.toml.
 
 To format a number for a specific locale, you can use the `locale` argument and pass the name of the desired locale:
 
-```jinja2
+```jinja
+{% raw -%}
 {{ 1000000 | num_format(locale="en-IN") }}
 <!-- 10,00,000 -->
+{%- endraw %}
 ```
 
 ## Built-in functions
 
-Zola adds a few Tera functions to [those built-in in Tera](https://tera.netlify.com/docs#built-in-functions)
+Zola adds a few Tera functions to [those built-in in Tera](https://keats.github.io/tera/#built-in-functions)
 to make it easier to develop complex sites.
 
 ### File searching logic
 For functions that are searching for a file on disk other than through `get_page` and `get_section`, the following
 logic applies.
 
-1. The base directory is the Zola root directory, where the `config.toml` is
+1. The base directory is the Zola root directory, where the `zola.toml` is
 2. For the given path: if it starts with `@/`, replace that with `content/` instead and trim any leading `/`
 3. Search in the following locations in this order, returning the first where the file exists:
-   1. $base_directory + $path
-   2. $base_directory + "static/" + $path
-   3. $base_directory + "content/" + $path
-   4. $base_directory + $output_path + $path
-   5. $base_directory + "themes" + $theme + "static/" + $path (only if using a theme)
+   1. `$base_directory` + `$path`
+   2. `$base_directory` + `"static/"` + `$path`
+   3. `$base_directory` + `"content/"` + `$path`
+   4. `$base_directory` + `$output_path` + `$path`
+   5. `$base_directory` + `"themes"` + `$theme` + `"static/"` + `$path` (only if using a theme)
 
 In practice this means that `@/some/image.jpg`, `/content/some/image.jpg` and `content/some/image.jpg` will point to the
 same thing.
@@ -129,42 +146,104 @@ It will error if the path is outside the Zola directory.
 ### `get_page`
 Takes a path to an `.md` file and returns the associated page. The base path is the `content` directory.
 
-```jinja2
+```jinja
+{% raw -%}
 {% set page = get_page(path="blog/page2.md") %}
+{%- endraw %}
+```
+
+If selecting a specific language for the page, you can pass `lang` with the language code to the function:
+
+```jinja
+{% raw -%}
+{% set page = get_page(path="blog/page2.md", lang="fr") %}
+
+{# If "fr" is the default language, this is equivalent to #}
+{% set page = get_page(path="blog/page2.md") %}
+{%- endraw %}
+```
+
+If you want to ignore a missing page instead of raising an error, like in the case where you have a link to a draft page you want to handle yourself, you can pass `allow_missing=true` to the function:
+
+```jinja
+{% raw -%}
+{% set linked_page = get_page(path='blog/path-to-draft.md', allow_missing=true) %}
+{% if linked_page %}
+<a href="{{get_url(path='@/blog/page-in-draft.md')}}">
+    {{linked_page.title}}
+</a>
+{% else %}
+<span></span>
+{% endif %}
+{%- endraw %}
 ```
 
 ### `get_section`
 Takes a path to an `_index.md` file and returns the associated section. The base path is the `content` directory.
 
-```jinja2
+```jinja
+{% raw -%}
 {% set section = get_section(path="blog/_index.md") %}
+{%- endraw %}
 ```
 
 If you only need the metadata of the section, you can pass `metadata_only=true` to the function:
 
-```jinja2
+```jinja
+{% raw -%}
 {% set section = get_section(path="blog/_index.md", metadata_only=true) %}
+{%- endraw %}
+```
+
+If selecting a specific language for the section, you can pass `lang` with the language code to the function:
+
+```jinja
+{% raw -%}
+{% set section = get_section(path="blog/_index.md", lang="fr") %}
+
+{# If "fr" is the default language, this is equivalent to #}
+{% set section = get_section(path="blog/_index.md") %}
+{%- endraw %}
+```
+
+If you want to ignore a missing section instead of raising an error, like in the case where you have a link to a draft section you want to handle yourself, you can pass `allow_missing=true` to the function:
+
+```jinja
+{% raw -%}
+{% set linked_section = get_section(path='blog/path-to-draft.md', allow_missing=true) %}
+{% if linked_section %}
+<a href="{{get_url(path='@/blog/section-in-draft.md')}}">
+    {{linked_section.title}}
+</a>
+{% else %}
+<span></span>
+{% endif %}
+{%- endraw %}
 ```
 
 ### `get_taxonomy_url`
 Gets the permalink for the taxonomy item found.
 
-```jinja2
-{% set url = get_taxonomy_url(kind="categories", name=page.taxonomies.category, lang=page.lang) %}
+```jinja
+{% raw -%}
+{% set url = get_taxonomy_url(kind="categories", term=page.taxonomies.category, lang=page.lang) %}
+{%- endraw %}
 ```
 
-`name` will almost always come from a variable but in case you want to do it manually,
+`term` will almost always come from a variable but in case you want to do it manually,
 the value should be the same as the one in the front matter, not the slugified version.
 
-`lang` (optional) default to `config.default_language` in config.toml
+`lang` (optional) default to `config.default_language` in zola.toml
 
 `required` (optional) if a taxonomy is defined but there isn't any content that uses it then throw an error. Defaults to true.
 
 ### `get_taxonomy`
 Gets the whole taxonomy of a specific kind.
 
-```jinja2
+```jinja
+{% raw -%}
 {% set categories = get_taxonomy(kind="categories") %}
+{%- endraw %}
 ```
 
 The type of the output is:
@@ -172,21 +251,45 @@ The type of the output is:
 ```ts
 kind: TaxonomyConfig;
 items: Array<TaxonomyTerm>;
+lang: String;
+permalink: String;
 ```
 
-`lang` (optional) default to `config.default_language` in config.toml
+`lang` (optional) default to `config.default_language` in zola.toml
 
 `required` (optional) if a taxonomy is defined but there isn't any content that uses it then throw an error. Defaults to true.
 
 See the [Taxonomies documentation](@/documentation/templates/taxonomies.md) for a full documentation of those types.
 
+### `get_taxonomy_term`
+Gets a single term from a taxonomy of a specific kind.
+
+```jinja
+{% raw -%}
+{% set categories = get_taxonomy_term(kind="categories", term="term_name") %}
+{%- endraw %}
+```
+
+The type of the output is a single `TaxonomyTerm` item.
+
+`lang` (optional) default to `config.default_language` in zola.toml
+
+`include_pages` (optional) default to true. If false, the `pages` item in the `TaxonomyTerm` will be empty, regardless of what pages may actually exist for this term. `page_count` will correctly reflect the number of pages for this term in both cases.
+
+`required` (optional) if a taxonomy or term is not found`.
+
+See the [Taxonomies documentation](@/documentation/templates/taxonomies.md) for a full documentation of those types.
+
 ### `get_url`
 Gets the permalink for the given path.
-If the path starts with `@/`, it will be treated as an internal link like the ones used in Markdown, 
-starting from the root `content` directory as well as validated.
+If the path starts with `@/`, it will be treated as an [internal link](@/documentation/content/linking.md#internal-links) to a Markdown file or
+a colocated asset,  starting from the root `content` directory as well as validated.
 
-```jinja2
+```jinja
+{% raw -%}
 {% set url = get_url(path="@/blog/_index.md") %}
+{% set asset = get_url(path="@/blog/my-article/graph.png", lang="fr") %}
+{%- endraw %}
 ```
 
 It accepts an optional parameter `lang` in order to compute a *language-aware URL* in multilingual websites. Assuming `config.base_url` is `"http://example.com"`, the following snippet will:
@@ -195,51 +298,65 @@ It accepts an optional parameter `lang` in order to compute a *language-aware UR
 - return `"http://example.com/en/blog/"` if `config.default_language` is **not** `"en"` and `"en"` appears in `config.languages`
 - fail otherwise, with the error message `"'en' is not an authorized language (check config.languages)."`
 
-```jinja2
+```jinja
+{% raw -%}
 {% set url = get_url(path="@/blog/_index.md", lang="en") %}
+{%- endraw %}
 ```
 
-This can also be used to get the permalinks for static assets, for example if
-we want to link to the file that is located at `static/css/app.css`:
+This can also be used to get the permalink for a static file, for example if
+you want to link to the file that is located at `static/css/app.css`:
 
-```jinja2
-{{/* get_url(path="css/app.css") */}}
+```jinja
+{% raw -%}
+{{ get_url(path="css/app.css") }}
+{%- endraw %}
 ```
 
-By default, assets will not have a trailing slash. You can force one by passing `trailing_slash=true` to the `get_url` function.
+By default, the link will not have a trailing slash. You can force one by passing `trailing_slash=true` to the `get_url` function.
 An example is:
 
-```jinja2
-{{/* get_url(path="css/app.css", trailing_slash=true) */}}
+```jinja
+{% raw -%}
+{{ get_url(path="css/app.css", trailing_slash=true) }}
+{%- endraw %}
 ```
 
-In the case of non-internal links, you can also add a cachebust of the format `?h=<sha256>` at the end of a URL
+In the case of a non-internal link, you can also add a cachebust of the format `?h=<sha256>` at the end of a URL
 by passing `cachebust=true` to the `get_url` function. In this case, the path will need to resolve to an actual file. 
 See [File Searching Logic](@/documentation/templates/overview.md#file-searching-logic) for details.
 
-### `get_file_hash`
+### `get_hash`
 
-Returns the hash digest (SHA-256, SHA-384 or SHA-512) of a file.
+Returns the hash digest (SHA-256, SHA-384 or SHA-512) of a file or a string literal.
 
 It can take the following arguments:
 - `path`: mandatory, see [File Searching Logic](@/documentation/templates/overview.md#file-searching-logic) for details
+- **or** `literal`: mandatory, the string value to be hashed
 - `sha_type`: optional, one of `256`, `384` or `512`, defaults to `384`
 - `base64`: optional, `true` or `false`, defaults to `true`. Whether to encode the hash as base64
 
-```jinja2
-{{/* get_file_hash(path="static/js/app.js", sha_type=256) */}}
+Either `path` or `literal` must be given.
+
+```jinja
+{% raw -%}
+{{ get_hash(literal="Hello World", sha_type=256) }}
+{{ get_hash(path="static/js/app.js", sha_type=256) }}
+{%- endraw %}
 ```
 
 The function can also output a base64-encoded hash value when its `base64`
 parameter is set to `true`. This can be used to implement [subresource
 integrity](https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity).
 
-```jinja2
-<script src="{{/* get_url(path="static/js/app.js") */}}"
-  integrity="sha384-{{ get_file_hash(path="static/js/app.js", sha_type=384, base64=true) | safe }}"></script>
+```jinja
+{% raw -%}
+<script src="{{ get_url(path="static/js/app.js") }}"
+  integrity="sha384-{{ get_hash(path="static/js/app.js", sha_type=384, base64=true) | safe }}"></script>
+{%- endraw %}
 ```
 
-Do note that subresource integrity is typically used when using external scripts, which `get_file_hash` does not support.
+Do note that subresource integrity is typically used when using external scripts, which `get_hash` does not support.
 
 ### `get_image_metadata`
 
@@ -250,51 +367,83 @@ It can take the following arguments:
 - `path`: mandatory, see [File Searching Logic](@/documentation/templates/overview.md#file-searching-logic) for details
 - `allow_missing`: optional, `true` or `false`, defaults to `false`. Whether a missing file should raise an error or not.
 
-The method returns a map containing `width`, `height` and `format` (the lowercased value as string).
+The method returns a map containing `width`, `height`, `format`, `mime`, `description`, and `created`. The `format` returned is the most common file extension for the file format, which may not match the one used for the image. `created` is the date the image was created; for a picture it will be the date the picture was taken.
 
-```jinja2
+```jinja
+{% raw -%}
   {% set meta = get_image_metadata(path="...") %}
   Our image (.{{meta.format}}) has format is {{ meta.width }}x{{ meta.height }}
+{%- endraw %}
 ```
 
 ### `load_data`
-Loads data from a file or URL. Supported file types include *toml*, *json*, *csv* and *bibtex* and only supports UTF-8 encoding.
+
+Loads data from a file, URL, or string literal. Supported file types include *toml*, *json*, *csv*, *bibtex*, *yaml*/*yml*, 
+and *xml* and only supports UTF-8 encoding.
+
 Any other file type will be loaded as plain text.
 
-The `path` argument specifies the path to the data file, according to the [File Searching Logic](@/documentation/templates/overview.md#file-searching-logic).
+The `path` argument specifies the path to a local data file, according to the [File Searching Logic](@/documentation/templates/overview.md#file-searching-logic).
 
-```jinja2
+```jinja
+{% raw -%}
 {% set data = load_data(path="content/blog/story/data.toml") %}
+{%- endraw %}
 ```
+
+Alternatively, the `url` argument specifies the location of a remote URL to load.
+
+```jinja
+{% raw -%}
+{% set data = load_data(url="https://en.wikipedia.org/wiki/Commune_of_Paris") %}
+{%- endraw %}
+```
+
+Alternatively, the `literal` argument specifies an object literal. Note: if the `format` argument is not specified, then plain text will be what is assumed.
+
+```jinja
+{% raw -%}
+{% set data = load_data(literal='{"name": "bob"}', format="json") %}
+{{ data["name"] }}
+{%- endraw %}
+```
+
+*Note: the `required` parameter has no effect when used in combination with the `literal` argument.*
 
 The optional `required` boolean argument can be set to false so that missing data (HTTP error or local file not found) does not produce an error, but returns a null value instead. However, permission issues with a local file and invalid data that could not be parsed to the requested data format will still produce an error even with `required=false`.
 
 The snippet below outputs the HTML from a Wikipedia page, or "No data found" if the page was not reachable, or did not return a successful HTTP code:
 
-```jinja2
-{% set data = load_data(path="https://en.wikipedia.org/wiki/Commune_of_Paris", required=false) %}
+```jinja
+{% raw -%}
+{% set data = load_data(url="https://en.wikipedia.org/wiki/Commune_of_Paris", required=false) %}
 {% if data %}{{ data | safe }}{% else %}No data found{% endif %}
+{%- endraw %}
 ```
 
-The optional `format` argument allows you to specify and override which data type is contained
-within the file specified in the `path` argument. Valid entries are `toml`, `json`, `csv`, `bibtex`
-or `plain`. If the `format` argument isn't specified, then the path extension is used.
+The optional `format` argument allows you to specify and override which data type is contained within the specified file or URL.
+Valid entries are `toml`, `json`, `csv`, `bibtex`, `yaml`, `xml` or `plain`. If the `format` argument isn't specified, then the 
+path extension is used. In the case of a literal, `plain` is assumed if `format` is unspecified.
 
 
-```jinja2
+```jinja
+{% raw -%}
 {% set data = load_data(path="content/blog/story/data.txt", format="json") %}
+{%- endraw %}
 ```
 
-Use the `plain` format for when your file has a toml/json/csv extension but you want to load it as plain text.
+Use the `plain` format for when your file has a supported extension but you want to load it as plain text.
 
-For *toml* and *json*, the data is loaded into a structure matching the original data file;
+For *toml*, *json*, *yaml* and *xml*, the data is loaded into a structure matching the original data file;
 however, for *csv* there is no native notion of such a structure. Instead, the data is separated
 into a data structure containing *headers* and *records*. See the example below to see
 how this works.
 
 In the template:
-```jinja2
+```jinja
+{% raw -%}
 {% set data = load_data(path="content/blog/story/data.csv") %}
+{%- endraw %}
 ```
 
 In the *content/blog/story/data.csv* file:
@@ -363,9 +512,11 @@ The following is the json-equivalent format of the produced bibtex data structur
 ```
 
 Finally, the bibtex data can be accessed from the template as follows:
-```jinja2
+```jinja
+{% raw -%}
 {% set tags = data.bibliographies[0].tags %}
 This was generated using {{ tags.title }}, authored by {{ tags.author }}.
+{%- endraw %}
 ```
 
 #### Remote content
@@ -373,18 +524,22 @@ This was generated using {{ tags.title }}, authored by {{ tags.author }}.
 Instead of using a file, you can load data from a remote URL. This can be done by specifying a `url` parameter
 to `load_data` rather than `path`.
 
-```jinja2
+```jinja
+{% raw -%}
 {% set response = load_data(url="https://api.github.com/repos/getzola/zola") %}
 {{ response }}
+{%- endraw %}
 ```
 
 By default, the response body will be returned with no parsing. This can be changed by using the `format` argument
 as below.
 
 
-```jinja2
+```jinja
+{% raw -%}
 {% set response = load_data(url="https://api.github.com/repos/getzola/zola", format="json") %}
 {{ response }}
+{%- endraw %}
 ```
 
 When no other parameters are specified the URL will always be retrieved using a HTTP GET request.
@@ -396,7 +551,8 @@ The parameter `content_type` should be the mimetype of the body.
 
 This example will make a POST request to the kroki service to generate a SVG.
 
-```jinja2
+```jinja
+{% raw -%}
 {% set postdata = load_data(url="https://kroki.io/blockdiag/svg", format="plain", method="POST" ,content_type="text/plain", body="blockdiag {
   'Doing POST' -> 'using load_data'
   'using load_data' -> 'can generate' -> 'block diagrams';
@@ -407,6 +563,48 @@ This example will make a POST request to the kroki service to generate a SVG.
   'very easy!' [color = 'orange'];
 }")%}
 {{postdata|safe}}
+{%- endraw %}
+```
+
+If you need additional handling for the HTTP headers, you can use the `headers` parameter.
+You might need this parameter when the resource requires authentication or require passing additional
+parameters via special headers.
+Please note that the headers will be appended to the default headers set by Zola itself instead of replacing them.
+
+This example will make a POST request to the GitHub markdown rendering service.
+
+```jinja
+{% raw -%}
+{% set postdata = load_data(url="https://api.github.com/markdown", format="plain", method="POST", content_type="application/json", headers=["accept=application/vnd.github.v3+json"], body='{"text":"headers support added in #1710, commit before it: b3918f124d13ec1bedad4860c15a060dd3751368","context":"getzola/zola","mode":"gfm"}')%}
+{{postdata|safe}}
+{%- endraw %}
+```
+
+The following example shows how to send a GraphQL query to GitHub (requires authentication).
+If you want to try this example on your own machine, you need to provide a GitHub PAT (Personal Access Token),
+you can acquire the access token at this link: https://github.com/settings/tokens and then set `GITHUB_TOKEN`
+environment variable to the access token you have obtained.
+
+```jinja
+{% raw -%}
+{% set token = get_env(name="GITHUB_TOKEN") %}
+{% set postdata = load_data(url="https://api.github.com/graphql", format="json", method="POST" ,content_type="application/json", headers=["accept=application/vnd.github.v4.idl", "authorization=Bearer " ~ token], body='{"query":"query { viewer { login }}"}')%}
+{{postdata|safe}}
+{%- endraw %}
+```
+
+In case you need to specify multiple headers with the same name, you can specify them like this:
+
+```
+headers=["accept=application/json,text/html"]
+```
+
+Which is equivalent to two `Accept` headers with `application/json` and `text/html`.
+
+If it doesn't work, you can instead specify the headers multiple times to achieve a similar effect:
+
+```
+headers=["accept=application/json", "accept=text/html"]
 ```
 
 #### Data caching
@@ -417,13 +615,28 @@ URLs are cached based on the URL, and data files are cached based on the file mo
 The format is also taken into account when caching, so a request will be sent twice if it's loaded with two
 different formats.
 
+### `text_direction`
+Gets the horizontal text directionality for the `default_language`, the `lang`uage given or the active language:
+
+```jinja
+{% raw -%}
+{{ text_direction() }}
+{{ text_direction(lang="fr") }}
+{{ text_direction(lang=lang) }}
+{%- endraw %}
+```
+
+Returns the string literal `ltr` or `rtl`, which may be passed directly into the [`dir` global HTML attribute](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/dir).
+
 ### `trans`
 Gets the translation of the given `key`, for the `default_language`, the `lang`uage given or the active language:
 
-```jinja2
-{{/* trans(key="title") */}}
-{{/* trans(key="title", lang="fr") */}}
-{{/* trans(key="title", lang=lang) */}}
+```jinja
+{% raw -%}
+{{ trans(key="title") }}
+{{ trans(key="title", lang="fr") }}
+{{ trans(key="title", lang=lang) }}
+{%- endraw %}
 ```
 
 ### `resize_image`

@@ -1,0 +1,29 @@
+[package]
+name = "markdown"
+version.workspace = true
+edition.workspace = true
+include = ["src/**/*"]
+
+[dependencies]
+ahash = { workspace = true }
+gh-emoji = { workspace = true }
+pulldown-cmark = { workspace = true }
+pulldown-cmark-escape = { workspace = true }
+regex = { workspace = true }
+tera = { workspace = true }
+giallo = { workspace = true }
+log = { workspace = true }
+
+errors = { workspace = true }
+utils = { workspace = true }
+config = { workspace = true }
+render = { workspace = true }
+
+[dev-dependencies]
+templates = { workspace = true }
+insta = { workspace = true }
+criterion = { version = "0.8", features = ["html_reports"] }
+
+[[bench]]
+name = "all"
+harness = false

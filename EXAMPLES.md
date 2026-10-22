@@ -9,11 +9,7 @@
 | [seventeencups](https://www.seventeencups.net)                     | https://github.com/17cupsofcoffee/seventeencups.net      |
 | [j1m.net](https://j1m.net)                                         | https://gitlab.com/jwcampbell/j1mnet                     |
 | [vaporsoft.net](http://vaporsoft.net)                              | https://github.com/piedoom/vaporsoft                     |
-| [verpeteren.nl](http://www.verpeteren.nl)                          |                                                          |
-| [atlasreports.nl](http://www.atlasreports.nl)                      |                                                          |
-| [groksome.com](http://www.groksome.com)                            |                                                          |
 | [tuckersiemens.com](https://tuckersiemens.com)                     | https://github.com/reillysiemens/tuckersiemens.com       |
-| [andrewzah.com](https://andrewzah.com)                             | https://git.sr.ht/~andrewzah/personal-site/tree          |
 | [Axiomatic Semantics](https://axiomatic.neophilus.net)             | https://github.com/Libbum/AxiomaticSemantics             |
 | [Tinkering](https://tinkering.xyz)                                 |                                                          |
 | [Daniel Sockwell's codesections.com](https://www.codesections.com) | https://gitlab.com/codesections/codesections-website     |
@@ -23,12 +19,10 @@
 | [shaleenjain.com](https://shaleenjain.com)                         | https://github.com/shalzz/shalzz.github.io               |
 | [Hello, Rust!](https://hello-rust.show)                            | https://github.com/hello-rust/hello-rust.github.io       |
 | [maxdeviant.com](https://maxdeviant.com/)                          |                                                          |
-| [Uwes Blog](https://uwe-arzt.de)                                   | https://github.com/uwearzt/site-uwe-arzt                 |
+| [Uwes Blog](https://uwe-arzt.de)                                   | https://codeberg.org/uwearzt/site-uwe-arzt               |
 | [ozkriff.games](https://ozkriff.games)                             | https://github.com/ozkriff/ozkriff.github.io-src         |
-| [Sylvain Kerkour](https://kerkour.fr)                              | https://gitlab.com/z0mbie42/kerkour.fr                   |
 | [CodeShow by Bruno Rocha](https://codeshow.com.br)                 | https://github.com/codeshow/site                         |
-| [trevordmiller.com](https://trevordmiller.com)                     | https://github.com/trevordmiller/trevordmiller.github.io |
-| [fundon.me](https://fundon.me/)                                    | https://github.com/fundon/fundon.github.io               |
+| [fundon.me](https://fundon.viz.rs/)                                | https://github.com/fundon/fundon.github.io               |
 | [rust-gamedev.github.io](https://rust-gamedev.github.io)           | https://github.com/rust-gamedev/rust-gamedev.github.io   |
 | [arewegameyet.rs](http://arewegameyet.rs)                          | https://github.com/rust-gamedev/arewegameyet             |
 | [klau.si](https://klau.si)                                         | https://github.com/klausi/klau.si                        |
@@ -39,5 +33,17 @@
 | [NorthCon e.V.](https://verein.northcon.de/)                       |                                                          |
 | [OrgaTalk wiki](https://wiki.orgatalk.de/)                         | https://github.com/orgatalk/wiki                         |
 | [Der Corona-Effekt](https://corona-effekt.orgatalk.de/)            | https://github.com/orgatalk/corona-effekt                |
-| [Table Dog](https://table.dog/blog/)                               |                                                          |
-| [146 Parks](https://146parks.blog/)                                | https://github.com/scouten/146parks.blog                         |
+| [146 Parks](https://146parks.blog/)                                | https://github.com/scouten/146parks.blog                 |
+| [films.mlcdf.fr](https://films.mlcdf.fr)                           | https://github.com/mlcdf/films                           |
+| [Mish Ushakov](https://mish.co)                                    |                                                          |
+| [castor](https://castorisdead.xyz)                                 | https://github.com/whoisYoges/website                    |
+| [mrkaran](https://mrkaran.dev)                                     | https://github.com/mr-karan/website                      |
+| [Gijs Burghoorn](https://gburghoorn.com)                           | https://github.com/coastalwhite/gburghoorn.com/          |
+| [Peter Todorov](https://peterprototypes.com/)                      | https://github.com/peterprototypes/peterprototypes.com   |
+| [failsafe.monster](https://failsafe.monster/)                      |                                                          |
+| [Joshua Gawley](https://www.joshuagawley.com/)                     | https://github.com/joshuagawley/joshuagawley.github.io   |
+| [dmarcoux.com](https://dmarcoux.com)                               | https://github.com/dmarcoux/dmarcoux.com                 |
+| [Herman Schaaf's Blog](https://hermanschaaf.com)                   | https://github.com/hermanschaaf/zola-blog                |
+| [Nizzlay](https://nizzlay.com)                                     | https://github.com/Nizzlay/nizzlay.com                   |
+| [Lysator](https://www.lysator.liu.se)                              | https://git.lysator.liu.se/www/hemsida                   |
+| [Zola Demo Site](https://tandiljuan.github.io/zola-demo/)          | https://github.com/tandiljuan/zola-demo                  |

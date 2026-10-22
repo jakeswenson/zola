@@ -4,7 +4,7 @@ weight = 30
 +++
 
 Creating a theme is exactly like creating a normal site with Zola, except you
-will want to use many [Tera blocks](https://tera.netlify.com/docs#inheritance) to
+will want to use many [Tera blocks](https://keats.github.io/tera/#inheritance) to
 allow users to easily modify it.
 
 ## Getting started
@@ -16,6 +16,8 @@ following fields:
 ```toml
 name = "my theme name"
 description = "A classic blog theme"
+# An optional tags to allow quick search
+tags = []
 license = "MIT"
 homepage = "https://github.com/getzola/hyde"
 # The minimum version of Zola required
@@ -23,7 +25,7 @@ min_version = "0.4.0"
 # An optional live demo URL
 demo = ""
 
-# Any variable there can be overridden in the end user `config.toml`
+# Any variable there can be overridden in the end user `zola.toml`
 # You don't need to prefix variables by the theme name but as this will
 # be merged with user data, some kind of prefix or nesting is preferable
 # Use snake_casing to be consistent with the rest of Zola
@@ -54,15 +56,10 @@ to be able to build the theme from your repository.
 ## Submitting a theme to the gallery
 
 If you want your theme to be featured in the [themes](@/themes/_index.md) section
-of this site, the theme will require two more things:
-
-- `screenshot.png`: a screenshot of the theme in action with a max size of around 2000x1000
-- `README.md`: a thorough README explaining how to use the theme and any other information
-of importance
-
-The first step is to make sure that the theme meets the following three requirements:
+of this site, make sure that the theme meets the following three requirements:
 
 - have a `screenshot.png` of the theme in action with a max size of around 2000x1000
+- have a default working site in the repository, with a `{zola,config}.toml` in it
 - have a thorough `README.md` explaining how to use the theme and any other information
 of importance
 - be of reasonably high quality

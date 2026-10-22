@@ -1,0 +1,216 @@
+
++++
+title = "abridge"
+description = "A fast and lightweight Zola theme using semantic html, a class-light abridge.css, and No mandatory JS."
+template = "theme.html"
+date = 2026-10-11T20:22:06-07:00
+
+[taxonomies]
+theme-tags = []
+
+[extra]
+created = 2026-10-11T20:22:06-07:00
+updated = 2026-10-11T20:22:06-07:00
+repository = "https://github.com/Jieiku/abridge.git"
+homepage = "https://github.com/jieiku/abridge"
+minimum_version = "0.23.6"
+license = "MIT"
+demo = "https://abridge.pages.dev/"
+
+[extra.author]
+name = "Jake G (jieiku)"
+homepage = "https://github.com/jieiku/"
++++        
+
+<div align="center">
+<img src="https://raw.githubusercontent.com/Jieiku/abridge/master/abridge.svg"/>
+
+# Abridge Zola Theme
+
+A fast, lightweight, and modern [Zola](https://getzola.org) theme utilizing class-light semantic HTML with modular CSS. Perfect [Lighthouse](https://pagespeed.web.dev/report?url=abridge.pages.dev), [YellowLabTools](https://yellowlab.tools/), and [Observatory](https://developer.mozilla.org/en-US/observatory/analyze?host=abridge.pages.dev) scores. See the Zola Themes Benchmarks [Zola Themes Benchmarks](https://github.com/Jieiku/zola-themes-benchmarks/blob/main/README.md).
+
+![Lighthouse Score](https://raw.githubusercontent.com/Jieiku/abridge/master/content/overview-abridge/lighthouse.png)
+
+Maintenance of this project is made possible by all the <a href="https://github.com/Jieiku/abridge/graphs/contributors">contributors</a> and <a href="https://github.com/sponsors/Jieiku">sponsors</a>. If you'd like to sponsor this project and have your avatar or company logo appear below <a href="https://github.com/sponsors/Jieiku">click here</a>. 💖
+
+<!-- sponsors --><a href="https://github.com/yugfletcher"><img src="https:&#x2F;&#x2F;github.com&#x2F;yugfletcher.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/samueloph"><img src="https:&#x2F;&#x2F;github.com&#x2F;samueloph.png" width="60px" alt="User avatar: Samuel Henrique" /></a><a href="https://github.com/bensuperpc"><img src="https:&#x2F;&#x2F;github.com&#x2F;bensuperpc.png" width="60px" alt="User avatar: Bensuperpc" /></a><!-- sponsors -->
+
+---
+
+**[View Abridge demo](https://abridge.pages.dev/overview-abridge/)**
+</div>
+
+## Features
+
+- Perfect [Lighthouse](https://pagespeed.web.dev/report?url=abridge.pages.dev), [YellowLabTools](https://yellowlab.tools/), and [Observatory](https://developer.mozilla.org/en-US/observatory/analyze?host=abridge.pages.dev) scores.
+- [PWA support](https://abridge.pages.dev/overview-abridge/#pwa-progressive-web-app) (Progressive Web Application).
+- All JavaScript can be [fully disabled](https://abridge.pages.dev/overview-abridge/#javascript-files).
+- Dark, Light, Auto, and Switcher themes. (colors can be customized, css variables)
+- Code [syntax highlighting](https://abridge.pages.dev/overview-code-blocks/). (colors can be customized, css variables)
+- Numbered code blocks with [line highlighting](https://abridge.pages.dev/overview-code-blocks/#toml).
+- Entirely Offline Site by using the PWA **or** by setting `search_library = "offline"` or `search_library = "offlineflexsearch"` in `zola.toml`.
+- Multi-language support.
+- Search support. ([elasticlunr](https://abridge.pages.dev/), [pagefind](https://abridge-pagefind.pages.dev/), [tinysearch](https://abridge-tinysearch.pages.dev/), [flexsearch](https://abridge-flexsearch.pages.dev/))
+- Search Suggestions navigation keys, `/` focus, `arrow` move, `enter` select, `escape` close.
+- Search Results Page, type search query then hit `Enter key` or `click` the search button icon.
+- [SEO](https://abridge.pages.dev/overview-abridge/#seo-and-header-tags) support. (Search Engine Optimization)
+- [Pagination](https://abridge.pages.dev/overview-abridge/#pagination) with numbered paginator on index.
+- Title-based Previous and Next Article links at bottom of Article.
+- Table of Contents in page Index (Optional, clickable links)
+- Recent Posts Block. (Optional)
+- Back to Top button. (uses css only)
+- Code Blocks copy button.
+- Email link in footer obfuscation. (anti-spam)
+- [KaTeX](https://katex.org/) support.
+- [Archive page](https://abridge.pages.dev/archive/).
+- [Tags](https://abridge.pages.dev/tags/).
+- Categories. (similar to Tags, disabled/commented out by default)
+- Social icon links in footer.
+- Responsive design. (mobile first)
+- Video Components: [YouTube](https://abridge.pages.dev/video-streaming-sites/overview-embed-youtube/), [Vimeo](https://abridge.pages.dev/video-streaming-sites/overview-embed-vimeo/), [Streamable](https://abridge.pages.dev/video-streaming-sites/overview-embed-streamable/).
+- Media Components: [video](https://abridge.pages.dev/overview-rich-content/#video), [img](https://abridge.pages.dev/overview-images/#img-component), [imgswap](https://abridge.pages.dev/overview-images/#imgswap-component), [image](https://abridge.pages.dev/overview-rich-content/#image), [gif](https://abridge.pages.dev/overview-rich-content/#gif), [audio](https://abridge.pages.dev/overview-rich-content/#audio).
+- Other Components: [showdata](https://abridge.pages.dev/overview-showdata/), [katex](https://abridge.pages.dev/overview-math/#usage-1).
+
+**[Complete Documentation is available here](https://abridge.pages.dev/overview-abridge/)**
+
+## Windows Users
+
+Some setup steps use Unix-style commands during setup, to have a similar environment you can install [Msys2](https://www.msys2.org/).
+With msys2 use Shift+Insert to paste into the terminal, I prefer the UCRT64 launcher.
+
+```bash
+MSYS2
+pacman -Syu
+pacman -S --needed mingw-w64-ucrt-x86_64-git mingw-w64-ucrt-x86_64-zola mingw-w64-ucrt-x86_64-uutils-coreutils rsync
+```
+
+## Quick Start
+
+This theme requires version 0.23.6 or later of [Zola](https://www.getzola.org/documentation/getting-started/installation/)
+
+```bash
+git clone https://github.com/jieiku/abridge.git
+cd abridge
+zola serve
+# open http://127.0.0.1:1111/ in the browser
+```
+
+## Installation
+
+The Quick Start shows how to run the theme directly. Next we will use abridge as a theme to a NEW site.
+
+### 1: Create a new zola site
+
+```bash
+yes "" | zola init mysite
+cd mysite
+```
+
+### 2: Install Abridge
+
+Add the theme as a git submodule:
+
+```bash
+git init  # if your project is a git repository already, ignore this command
+git submodule add https://github.com/jieiku/abridge.git themes/abridge
+git submodule update --init --recursive
+git submodule update --remote --merge
+```
+
+Or clone the theme into your themes directory:
+
+```bash
+git clone https://github.com/jieiku/abridge.git themes/abridge
+```
+
+### 3: Configuration
+
+Copy some files from the theme directory to your project's root directory:
+
+```bash
+rsync themes/abridge/.gitignore .gitignore
+rsync themes/abridge/zola.toml zola.toml
+rsync themes/abridge/content/_index.md content/
+rsync -r themes/abridge/COPY-TO-ROOT-SASS/* sass/
+rsync themes/abridge/netlify.toml netlify.toml
+rsync themes/abridge/package_abridge.js package_abridge.js
+rsync themes/abridge/package.json package.json
+```
+
+- `zola.toml` base configuration with all config values.
+- `content/_index.md` required to set pagination.
+- `COPY-TO-ROOT-SASS/abridge.scss` overrides to customize Abridge variables.
+- `netlify.toml` settings to deploy your repo with netlify.
+- `package_abridge.js` node script to: update cache files list in PWA, minify js, bundle js
+- `package.json` to facilitate use of package_abridge.js
+
+Uncomment the theme line in your project's root zola.toml:
+
+```bash
+sed -i 's/^#theme = "abridge"/theme = "abridge"/' zola.toml
+```
+
+### 4: Add new content
+
+Copy the content from the theme directory to your project or make a new post:
+
+```bash
+rsync -r themes/abridge/content .
+```
+
+### 5: Run the project
+
+Just run `zola serve` in the root path of the project:
+
+```bash
+zola serve
+```
+
+Zola will start the dev web server, accessible by default at `http://127.0.0.1:1111`.
+
+Saved changes will live reload in the browser. (press `ctrl+f5`, or while developing set `pwa=false` in `zola.toml`)
+
+## Abridge build helper
+
+Install dependencies with `npm install`, then run a normal build with:
+
+```bash
+npm run abridge
+```
+
+The alternate search demos use an explicit build mode:
+
+```bash
+npm run abridge -- --mode elasticlunr --base-url https://abridge.pages.dev
+npm run abridge -- --mode pagefind --base-url https://abridge-pagefind.pages.dev
+npm run abridge -- --mode tinysearch --base-url https://abridge-tinysearch.pages.dev
+npm run abridge -- --mode flexsearch --base-url https://abridge-flexsearch.pages.dev
+npm run abridge -- --mode offline --drafts
+npm run abridge -- --mode offlineflexsearch --drafts
+```
+
+Valid modes are `elasticlunr`, `pagefind`, `tinysearch`, `flexsearch`, `offline`, `offlineflexsearch`, and `elasticlunrjava`.
+
+There is a `build-zola.sh` that helps with deployment at cloudflare, netlify, etc. The helper works both from the Abridge repository itself and when called from a site as `./themes/abridge/build-zola.sh`. The script checks `theme.toml` for the proper version of Zola to use, this avoids having to set or update Zola Version variables.
+
+## Customization
+
+For further customization be sure to [check the docs](https://abridge.pages.dev/overview-abridge/).
+
+## Sponsor
+
+Do you love this theme? Was it useful to you? Please leave a GitHub star, and if you feel inclined to donate you can make a donation to me through [github sponsors](https://github.com/sponsors/Jieiku/).
+
+## Contributing and Philosophy
+
+We'd love your help! Especially with fixes to issues, or improvements to existing features.
+
+The goal is for Abridge to be lightweight, fast, and to work properly even if JavaScript is disabled or blocked.
+
+The only feature that may be considered a necessity that relies on JavaScript is the Search.
+
+## License
+
+**Abridge** is distributed under the terms of the [MIT license](https://github.com/jieiku/abridge/blob/master/LICENSE).
+
+        

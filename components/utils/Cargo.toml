@@ -1,22 +1,22 @@
 [package]
 name = "utils"
-version = "0.1.0"
+version.workspace = true
 authors = ["Vincent Prouillet <prouillet.vincent@gmail.com>"]
-edition = "2018"
+edition.workspace = true
 include = ["src/**/*"]
 
 [dependencies]
-tera = "1"
-unicode-segmentation = "1.2"
-walkdir = "2"
-toml = "0.5"
-serde = { version = "1.0", features = ["derive"] }
-slug = "0.1"
-percent-encoding = "2"
-filetime = "0.2.12"
-minify-html = "0.6"
+serde = { workspace = true }
+filetime = { workspace = true }
+fs-err = { workspace = true }
+globset = { workspace = true }
+percent-encoding = { workspace = true }
+regex = { workspace = true }
+slug = { workspace = true }
+tera = { workspace = true }
+walkdir = { workspace = true }
 
-errors = { path = "../errors" }
+errors = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

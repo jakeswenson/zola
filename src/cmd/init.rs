@@ -1,10 +1,9 @@
-use std::fs::{canonicalize, create_dir};
+use fs_err as fs;
 use std::path::Path;
 
-use errors::{bail, Result};
+use errors::{Result, bail};
 use utils::fs::create_file;
 
-use crate::console;
 use crate::prompt::{ask_bool, ask_url};
 
 const CONFIG: &str = r#"
@@ -18,9 +17,9 @@ compile_sass = %COMPILE_SASS%
 build_search_index = %SEARCH%
 
 [markdown]
-# Whether to do syntax highlighting
-# Theme can be customised by setting the `highlight_theme` variable to a theme supported by Zola
-highlight_code = %HIGHLIGHT%
+
+[markdown.highlighting]
+theme = "catppuccin-mocha"
 
 [extra]
 # Put all your custom variables here
@@ -42,11 +41,7 @@ pub fn is_directory_quasi_empty(path: &Path) -> Result<bool> {
         let mut entries = match path.read_dir() {
             Ok(entries) => entries,
             Err(e) => {
-                bail!(
-                    "Could not read `{}` because of error: {}",
-                    path.to_string_lossy().to_string(),
-                    e
-                );
+                bail!("Could not read `{}` because of error: {}", path.to_string_lossy(), e);
             }
         };
         // If any entry raises an error or isn't hidden (i.e. starts with `.`), we raise an error
@@ -80,35 +75,30 @@ pub fn create_new_project(name: &str, force: bool) -> Result<()> {
         if name == "." {
             bail!("The current directory is not an empty folder (hidden files are ignored).");
         } else {
-            bail!(
-                "`{}` is not an empty folder (hidden files are ignored).",
-                path.to_string_lossy().to_string()
-            )
+            bail!("`{}` is not an empty folder (hidden files are ignored).", path.to_string_lossy())
         }
     }
 
     console::info("Welcome to Zola!");
     console::info("Please answer a few questions to get started quickly.");
-    console::info("Any choices made can be changed by modifying the `config.toml` file later.");
+    console::info("Any choices made can be changed by modifying the `zola.toml` file later.");
 
     let base_url = ask_url("> What is the URL of your site?", "https://example.com")?;
     let compile_sass = ask_bool("> Do you want to enable Sass compilation?", true)?;
-    let highlight = ask_bool("> Do you want to enable syntax highlighting?", false)?;
     let search = ask_bool("> Do you want to build a search index of the content?", false)?;
 
     let config = CONFIG
         .trim_start()
         .replace("%BASE_URL%", &base_url)
-        .replace("%COMPILE_SASS%", &format!("{}", compile_sass))
-        .replace("%SEARCH%", &format!("{}", search))
-        .replace("%HIGHLIGHT%", &format!("{}", highlight));
+        .replace("%COMPILE_SASS%", &format!("{compile_sass}"))
+        .replace("%SEARCH%", &format!("{search}"));
 
     populate(path, compile_sass, &config)?;
 
     println!();
     console::success(&format!(
         "Done! Your site was created in {}",
-        strip_unc(&canonicalize(path).unwrap())
+        strip_unc(&fs::canonicalize(path).unwrap())
     ));
     println!();
     console::info(
@@ -120,15 +110,15 @@ pub fn create_new_project(name: &str, force: bool) -> Result<()> {
 
 fn populate(path: &Path, compile_sass: bool, config: &str) -> Result<()> {
     if !path.exists() {
-        create_dir(path)?;
+        fs::create_dir(path)?;
     }
-    create_file(&path.join("config.toml"), config)?;
-    create_dir(path.join("content"))?;
-    create_dir(path.join("templates"))?;
-    create_dir(path.join("static"))?;
-    create_dir(path.join("themes"))?;
+    create_file(&path.join("zola.toml"), config)?;
+    fs::create_dir(path.join("content"))?;
+    fs::create_dir(path.join("templates"))?;
+    fs::create_dir(path.join("static"))?;
+    fs::create_dir(path.join("themes"))?;
     if compile_sass {
-        create_dir(path.join("sass"))?;
+        fs::create_dir(path.join("sass"))?;
     }
 
     Ok(())
@@ -137,8 +127,8 @@ fn populate(path: &Path, compile_sass: bool, config: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fs_err as fs;
     use std::env::temp_dir;
-    use std::fs::{create_dir, remove_dir, remove_dir_all};
     use std::path::Path;
 
     #[test]
@@ -146,12 +136,12 @@ mod tests {
         let mut dir = temp_dir();
         dir.push("test_empty_dir");
         if dir.exists() {
-            remove_dir_all(&dir).expect("Could not free test directory");
+            fs::remove_dir_all(&dir).expect("Could not free test directory");
         }
-        create_dir(&dir).expect("Could not create test directory");
+        fs::create_dir(&dir).expect("Could not create test directory");
         let allowed = is_directory_quasi_empty(&dir)
             .expect("An error happened reading the directory's contents");
-        remove_dir(&dir).unwrap();
+        fs::remove_dir(&dir).unwrap();
         assert!(allowed);
     }
 
@@ -160,16 +150,16 @@ mod tests {
         let mut dir = temp_dir();
         dir.push("test_non_empty_dir");
         if dir.exists() {
-            remove_dir_all(&dir).expect("Could not free test directory");
+            fs::remove_dir_all(&dir).expect("Could not free test directory");
         }
-        create_dir(&dir).expect("Could not create test directory");
+        fs::create_dir(&dir).expect("Could not create test directory");
         let mut content = dir.clone();
         content.push("content");
-        create_dir(&content).unwrap();
+        fs::create_dir(&content).unwrap();
         let allowed = is_directory_quasi_empty(&dir)
             .expect("An error happened reading the directory's contents");
-        remove_dir(&content).unwrap();
-        remove_dir(&dir).unwrap();
+        fs::remove_dir(&content).unwrap();
+        fs::remove_dir(&dir).unwrap();
         assert!(!allowed);
     }
 
@@ -178,16 +168,16 @@ mod tests {
         let mut dir = temp_dir();
         dir.push("test_quasi_empty_dir");
         if dir.exists() {
-            remove_dir_all(&dir).expect("Could not free test directory");
+            fs::remove_dir_all(&dir).expect("Could not free test directory");
         }
-        create_dir(&dir).expect("Could not create test directory");
+        fs::create_dir(&dir).expect("Could not create test directory");
         let mut git = dir.clone();
         git.push(".git");
-        create_dir(&git).unwrap();
+        fs::create_dir(&git).unwrap();
         let allowed = is_directory_quasi_empty(&dir)
             .expect("An error happened reading the directory's contents");
-        remove_dir(&git).unwrap();
-        remove_dir(&dir).unwrap();
+        fs::remove_dir(&git).unwrap();
+        fs::remove_dir(&dir).unwrap();
         assert!(allowed);
     }
 
@@ -196,19 +186,19 @@ mod tests {
         let mut dir = temp_dir();
         dir.push("test_existing_dir");
         if dir.exists() {
-            remove_dir_all(&dir).expect("Could not free test directory");
+            fs::remove_dir_all(&dir).expect("Could not free test directory");
         }
-        create_dir(&dir).expect("Could not create test directory");
+        fs::create_dir(&dir).expect("Could not create test directory");
         populate(&dir, true, "").expect("Could not populate zola directories");
 
-        assert!(dir.join("config.toml").exists());
+        assert!(dir.join("zola.toml").exists());
         assert!(dir.join("content").exists());
         assert!(dir.join("templates").exists());
         assert!(dir.join("static").exists());
         assert!(dir.join("themes").exists());
         assert!(dir.join("sass").exists());
 
-        remove_dir_all(&dir).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -216,19 +206,19 @@ mod tests {
         let mut dir = temp_dir();
         dir.push("test_non_existing_dir");
         if dir.exists() {
-            remove_dir_all(&dir).expect("Could not free test directory");
+            fs::remove_dir_all(&dir).expect("Could not free test directory");
         }
         populate(&dir, true, "").expect("Could not populate zola directories");
 
         assert!(dir.exists());
-        assert!(dir.join("config.toml").exists());
+        assert!(dir.join("zola.toml").exists());
         assert!(dir.join("content").exists());
         assert!(dir.join("templates").exists());
         assert!(dir.join("static").exists());
         assert!(dir.join("themes").exists());
         assert!(dir.join("sass").exists());
 
-        remove_dir_all(&dir).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -236,14 +226,14 @@ mod tests {
         let mut dir = temp_dir();
         dir.push("test_wihout_sass_dir");
         if dir.exists() {
-            remove_dir_all(&dir).expect("Could not free test directory");
+            fs::remove_dir_all(&dir).expect("Could not free test directory");
         }
-        create_dir(&dir).expect("Could not create test directory");
+        fs::create_dir(&dir).expect("Could not create test directory");
         populate(&dir, false, "").expect("Could not populate zola directories");
 
         assert!(!dir.join("sass").exists());
 
-        remove_dir_all(&dir).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -251,21 +241,21 @@ mod tests {
         let mut dir = temp_dir();
         dir.push("new_project1");
         if dir.exists() {
-            remove_dir_all(&dir).expect("Could not free test directory");
+            fs::remove_dir_all(&dir).expect("Could not free test directory");
         }
-        create_dir(&dir).expect("Could not create test directory");
+        fs::create_dir(&dir).expect("Could not create test directory");
         if cfg!(target_os = "windows") {
-            let stripped_path = strip_unc(&canonicalize(Path::new(&dir)).unwrap());
+            let stripped_path = strip_unc(&fs::canonicalize(Path::new(&dir)).unwrap());
             assert!(same_file::is_same_file(Path::new(&stripped_path), &dir).unwrap());
             assert!(!stripped_path.starts_with(LOCAL_UNC), "The path was not stripped.");
         } else {
             assert_eq!(
-                strip_unc(&canonicalize(Path::new(&dir)).unwrap()),
-                canonicalize(Path::new(&dir)).unwrap().to_str().unwrap().to_string()
+                strip_unc(&fs::canonicalize(Path::new(&dir)).unwrap()),
+                fs::canonicalize(Path::new(&dir)).unwrap().to_str().unwrap().to_string()
             );
         }
 
-        remove_dir_all(&dir).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     // If the following test fails it means that the canonicalize function is fixed and strip_unc
@@ -277,14 +267,14 @@ mod tests {
         let mut dir = temp_dir();
         dir.push("new_project2");
         if dir.exists() {
-            remove_dir_all(&dir).expect("Could not free test directory");
+            fs::remove_dir_all(&dir).expect("Could not free test directory");
         }
-        create_dir(&dir).expect("Could not create test directory");
+        fs::create_dir(&dir).expect("Could not create test directory");
 
-        let canonicalized_path = canonicalize(Path::new(&dir)).unwrap();
+        let canonicalized_path = fs::canonicalize(Path::new(&dir)).unwrap();
         assert!(same_file::is_same_file(Path::new(&canonicalized_path), &dir).unwrap());
         assert!(canonicalized_path.to_str().unwrap().starts_with(LOCAL_UNC));
 
-        remove_dir_all(&dir).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

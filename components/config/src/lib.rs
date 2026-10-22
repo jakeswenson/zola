@@ -1,14 +1,20 @@
 mod config;
-pub mod highlighting;
 mod theme;
 
+use std::path::Path;
+
 pub use crate::config::{
-    languages::LanguageOptions, link_checker::LinkChecker, search::Search, slugify::Slugify,
-    taxonomies::Taxonomy, Config,
+    Config,
+    languages::LanguageOptions,
+    link_checker::LinkChecker,
+    link_checker::LinkCheckerLevel,
+    markup::{HighlightStyle, Highlighting, Markdown},
+    search::{IndexFormat, Search},
+    slugify::Slugify,
+    taxonomies::TaxonomyConfig,
 };
 use errors::Result;
-
-use std::path::Path;
+pub use giallo::Registry;
 
 /// Get and parse the config.
 /// If it doesn't succeed, exit

@@ -1,9 +1,9 @@
 [package]
 name = "zola"
-version = "0.15.0"
+version.workspace = true
+edition.workspace = true
 authors = ["Vincent Prouillet <hello@vincentprouillet.com>"]
-edition = "2018"
-license = "MIT"
+license = "EUPL-1.2"
 readme = "README.md"
 description = "A fast static site generator with everything built-in"
 homepage = "https://www.getzola.org"
@@ -12,69 +12,141 @@ keywords = ["static", "site", "generator", "blog"]
 
 include = ["src/**/*", "LICENSE", "README.md"]
 
+[workspace]
+members = ["components/*"]
+
+[workspace.package]
+version = "0.23.6"
+edition = "2024"
+
 [build-dependencies]
-clap = "2"
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+clap_mangen = "0.3"
+tauri-winres = "0.3"
+time = "0.3"
 
 [[bin]]
 name = "zola"
 
 [dependencies]
-atty = "0.2.11"
-clap = { version = "2", default-features = false }
-chrono = "0.4"
-lazy_static = "1.1"
-termcolor = "1.0.4"
-# Used in init to ensure the url given as base_url is a valid one
-url = "2"
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 # Below is for the serve cmd
-hyper = { version = "0.14.1", default-features = false, features = ["runtime", "server", "http2", "http1"] }
-tokio = { version = "1.0.1", default-features = false, features = ["rt", "fs", "time"] }
-percent-encoding = "2"
-notify = "4"
-ws = "0.9"
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
+tokio = { version = "1.0.1", default-features = false, features = ["rt", "fs", "time", "net", "sync"] }
+notify-debouncer-full = "0.7"
 ctrlc = "3"
-open = "2"
-globset = "0.4"
-relative-path = "1"
-pathdiff = "0.2"
-serde_json = "1.0"
+open = "5"
 # For mimetype detection in serve mode
 mime_guess = "2.0"
+# For essence_str() function, see https://github.com/getzola/zola/issues/1845
+mime = "0.3.16"
+env_logger = { version ="0.11", default-features = false }
 
-site = { path = "components/site" }
-errors = { path = "components/errors" }
-front_matter = { path = "components/front_matter" }
-utils = { path = "components/utils" }
-search = { path = "components/search" }
+site = { workspace = true }
+errors = { workspace = true }
+console = { workspace = true }
+utils = { workspace = true }
+# For feature forwarding
+link_checker = { workspace = true }
+search = { workspace = true }
+templates = { workspace = true }
+reqwest = { workspace = true }
+
+# Direct workspace deps used by the binary
+ahash = { workspace = true }
+fs-err = { workspace = true }
+anstream = { workspace = true }
+anstyle = { workspace = true }
+globset = { workspace = true }
+log = { workspace = true }
+percent-encoding = { workspace = true }
+relative-path = { workspace = true }
+serde_json = { workspace = true }
+time = { workspace = true, features = ["formatting", "macros", "local-offset", "parsing"] }
+url = { workspace = true }
 
 [dev-dependencies]
 same-file = "1"
 
 [features]
-default = ["rust-tls"]
-rust-tls = ["site/rust-tls"]
-native-tls = ["site/native-tls"]
+indexing-zh = ["search/indexing-zh"]
+indexing-ja = ["search/indexing-ja"]
 
-[workspace]
-members = [
-    "components/config",
-    "components/errors",
-    "components/front_matter",
-    "components/rendering",
-    "components/site",
-    "components/templates",
-    "components/utils",
-    "components/search",
-    "components/imageproc",
-    "components/link_checker",
-    "components/library",
-]
+[workspace.dependencies]
+# External dependencies
+ahash = "0.8"
+ammonia = "4"
+anstream = "1"
+anstyle = "1"
+avif-parse = "2"
+base64 = "0.23"
+csv = "1"
+elasticlunr-rs = { version = "3.0.2", features = ["da", "no", "de", "du", "es", "fi", "fr", "hu", "it", "pt", "ro", "ru", "sv", "tr", "ko"] }
+fast_image_resize = { version = "6", features = ["image"] }
+filetime = "0.2"
+gh-emoji = "1"
+globset = "0.4"
+grass = { version = "0.13", default-features = false, features = ["random"] }
+image = { version = "0.25", default-features = true, features = ["avif"] }
+fs-err = "3.2.2"
+lexical-sort = "0.3"
+log = "0.4"
+minify-html = "0.18"
+nom-bibtex = "0.6"
+num-format = "0.4"
+percent-encoding = "2"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html", "simd"] }
+pulldown-cmark-escape = { version = "0.11", default-features = false }
+roxmltree_to_serde = "0.6"
+rayon = "1"
+regex = "1"
+relative-path = "2"
+reqwest = { version = "0.13", features = ["blocking"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.11"
+slug = "0.1"
+svg_metadata = "0.6"
+tera = {version = "2.0.0", features = ["fast", "glob_fs", "preserve_order"] }
+time = "0.3"
+toml = "0.9"
+unic-langid = "0.9"
+unicode-segmentation = "1.2"
+url = "2"
+walkdir = "2"
+webp = "0.3"
+giallo = {version = "0.5", features = ["dump"]}
+insta = "1"
+jiff = "0.2"
+memchr = "2.7.6"
+
+# Internal crates
+config = { path = "components/config" }
+console = { path = "components/console" }
+content = { path = "components/content" }
+errors = { path = "components/errors" }
+imageproc = { path = "components/imageproc" }
+link_checker = { path = "components/link_checker" }
+markdown = { path = "components/markdown" }
+search = { path = "components/search" }
+site = { path = "components/site" }
+templates = { path = "components/templates" }
+utils = { path = "components/utils" }
+render = { path = "components/render" }
 
 [profile.release]
 lto = true
 codegen-units = 1
+strip = true
 
 [profile.dev]
 # Disabling debug info speeds up builds a bunch,
 # and we don't rely on it for debugging that much.
 debug = 0
+
+[package.metadata.winres]
+OriginalFilename = "zola.exe"
+InternalName = "zola"

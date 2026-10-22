@@ -19,7 +19,13 @@ Any non-Markdown file in a section directory is added to the `assets` collection
 Markdown file using relative links.
 
 ## Drafting
-Just like pages sections can be drafted by setting the `draft` option in the front matter. By default this is not done. When a section is drafted it's descendants like pages, subsections and assets will not be processed unless the `--drafts` flag is passed. Note that even pages that don't have a `draft` status will not be processed if one of their parent sections is drafted.
+
+Just like pages, sections can be drafted by setting the `draft` option in
+the front matter, which is unset (`false`) by default.  When a section is
+drafted, its descendants (such as pages, subsections and assets) will **not**
+be processed unless the `--drafts` flag is passed.  Note that pages will not be
+processed if any of their parent sections is drafted, regardless of their own
+`draft` status.
 
 ## Front matter
 
@@ -48,7 +54,7 @@ description = ""
 # A draft section is only loaded if the `--drafts` flag is passed to `zola build`, `zola serve` or `zola check`.
 draft = false
 
-# Used to sort pages by "date", "title, "weight", or "none". See below for more information.
+# Used to sort pages by "date", "update_date", "title", "title_bytes", "weight", "slug" or "none". See below for more information.
 sort_by = "none"
 
 # Used by the parent section to order its subsections.
@@ -63,7 +69,7 @@ template = "section.html"
 # will always use the closest to itself.
 # However, a page's own `template` variable will always have priority.
 # Not set by default.
-page_template =
+# page_template =
 
 # This sets the number of pages to be displayed per paginated page.
 # No pagination will happen if this isn't set or if the value is 0.
@@ -73,13 +79,14 @@ paginate_by = 0
 # The default is page/1.
 paginate_path = "page"
 
-# If set, there will pagination will happen in a reversed order.
+# If set, pagination will happen in a reversed order.
 paginate_reversed = false
 
 # This determines whether to insert a link for each header like the ones you can see on this site if you hover over
 # a header.
 # The default template can be overridden by creating an `anchor-link.html` file in the `templates` directory.
-# This value can be "left", "right" or "none".
+# This value can be "left", "right", "heading" or "none".
+# "heading" means the full heading becomes the text of the anchor.
 insert_anchor_links = "none"
 
 # If set to "true", the section pages will be in the search index. This is only used if
@@ -94,7 +101,7 @@ render = true
 # Useful for the same reason as `render` but when you don't want a 404 when
 # landing on the root section page.
 # Example: redirect_to = "documentation/content/overview"
-redirect_to =
+# redirect_to =
 
 # If set to "true", the section will pass its pages on to the parent section. Defaults to `false`.
 # Useful when the section shouldn't split up the parent section, like
@@ -105,11 +112,15 @@ transparent = false
 # current one. This takes an array of paths, not URLs.
 aliases = []
 
-# If set to "true", a feed file will be generated for this section at the
+# If set to "true", feed files will be generated for this section at the
 # section's root path. This is independent of the site-wide variable of the same
 # name. The section feed will only include posts from that respective feed, and
 # not from any other sections, including sub-sections under that section.
-generate_feed = false
+generate_feeds = false
+
+# When set to `true`, the section will be rendered but will not be included in the parent subsection/sitemap/feeds/search/etc
+# By default it applies to all children of this section but each of them can opt out by setting their own hidden property
+hidden = false
 
 # Your own data.
 [extra]
@@ -134,17 +145,20 @@ example: a `blog` directory with three files: `blog/Post_1.md`,
 `blog/Post_2.md` and `blog/Post_3.md`.  To iterate over these posts and
 create a list of links to the posts, a simple template might look like this:
 
-```j2
+```jinja
+{% raw -%}
 {% for post in section.pages %}
   <h1><a href="{{ post.permalink }}">{{ post.title }}</a></h1>
 {% endfor %}
+{%- endraw %}
 ```
 
 This would iterate over the posts in the order specified
 by the `sort_by` variable set in the `_index.md` page for the corresponding
-section.  The `sort_by` variable can be given one of three values: `date`,
-`title`, `weight` or `none`.  If `sort_by` is not set, the pages will be
-sorted in the `none` order, which is not intended for sorted content.
+section.  The `sort_by` variable can be given a few values: `date`, `update_date`
+`title`, `title_bytes`, `weight`, `slug`, `permalink` or `none`.  If `sort_by`
+is not set, the pages will be sorted in the `none` order, which is not intended
+for sorted content.
 
 Any page that is missing the data it needs to be sorted will be ignored and
 won't be rendered. For example, if a page is missing the date variable and its
@@ -159,29 +173,45 @@ The `sort_by` front-matter variable can have the following values:
 
 ### `date`
 This will sort all pages by their `date` field, from the most recent (at the
-top of the list) to the oldest (at the bottom of the list).  Each page will
-get `page.earlier` and `page.later` variables that contain the pages with
-earlier and later dates, respectively.
+top of the list) to the oldest (at the bottom of the list). Each page will get
+`page.higher` and `page.lower` variables that contain the pages with earlier and
+later dates, respectively.
+
+### `update_date`
+Same as `date` except it will take into account any `updated` date for the pages.
 
 ### `title`
 This will sort all pages by their `title` field in natural lexical order, as
 defined  by `natural_lexical_cmp` in the [lexical-sort] crate. Each page will
-get `page.title_prev` and `page.title_next` variables that  contain the pages
+get `page.lower` and `page.higher` variables that contain the pages
 with  previous and next titles, respectively.
 
 For example, here is a natural lexical ordering: "bachata, BART, bolero,
 μ-kernel, meter, Métro, Track-2, Track-3, Track-13, underground". Notice how
-special characters and numbers are sorted reasonably. This is better than
-the standard sorting: "BART, Métro, Track-13, Track-2, Track-3, bachata,
-bolero, meter, underground, μ-kernel".
+special characters and numbers are sorted reasonably.
 
 [lexical-sort]: https://docs.rs/lexical-sort
 
+### `title_bytes`
+Same as `title` except it uses the bytes directly to sort.
+Natural sorting treats non-ascii
+characters like their closest ascii character. This can lead to unexpected
+results for languages with different character sets. The last three characters
+of the Swedish alphabet, åäö, for example would be considered by the natural
+sort as aao. In that case the standard byte-order sort may be more suitable.
+
 ### `weight`
-This will be sort all pages by their `weight` field, from lightest weight
-(at the top of the list) to heaviest (at the bottom of the list).  Each
-page gets `page.lighter` and `page.heavier` variables that contain the
+This will sort all pages by their `weight` field, from the lightest weight
+(at the top of the list) to the heaviest (at the bottom of the list). Each
+page gets `page.lower` and `page.higher` variables that contain the
 pages with lighter and heavier weights, respectively.
+
+### `slug`
+This will sort pages or sections by their slug in natural lexical order.
+
+### `permalink`
+Similar to `slug`, this will sort pages or sections by their permalink in natural lexical order.
+Useful if you set the `path` key on your pages.
 
 ### Reversed sorting
 When iterating through pages, you may wish to use the Tera `reverse` filter,
@@ -190,25 +220,17 @@ pages sorted by weight will be sorted from lightest (at the top) to heaviest
 (at the bottom); pages sorted by date will be sorted from oldest (at the top)
 to newest (at the bottom).
 
-`reverse` has no effect on:
-
-* `page.later` / `page.earlier`,
-* `page.title_prev` / `page.title_next`, or
-* `page.heavier` / `page.lighter`.
+`reverse` has no effect on `page.lower` / `page.higher`.
 
 If the section is paginated the `paginate_reversed=true` in the front matter of the relevant section should be set instead of using the filter.
 
 ## Sorting subsections
-Sorting sections is a bit less flexible: sections can only be sorted by `weight`,
-and do not have variables that point to the heavier/lighter sections.
+Sorting sections is a bit less flexible: sections can only be sorted by `weight`, `title` and `permalink`. Similarly to pages, section have `section.lower` and `section.higher`
+variables, pointing to the heavier/lighter sections.
 
 By default, the lightest (lowest `weight`) subsections will be at
 the top of the list and the heaviest (highest `weight`) will be at the bottom;
 the `reverse` filter reverses this order.
 
-**Note**: Unlike pages, permalinks will **not** be used to break ties between
-equally weighted sections. Thus, if the `weight` variable for your section is not set (or if it
-is set in a way that produces ties), then your sections will be sorted in
-**random** order. Moreover, that order is determined at build time and will
-change with each site rebuild.  Thus, if there is any chance that you will
-iterate over your sections, you should always assign them distinct weights.
+**Note**: A section's "transparency" doesn't apply to subsections, so subsections
+will not be visible as direct children of the parent section.

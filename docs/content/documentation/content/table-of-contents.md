@@ -11,7 +11,8 @@ documentation for information on its structure.
 
 Here is an example of using that field to render a two-level table of contents:
 
-```jinja2
+```jinja
+{% raw -%}
 {% if page.toc %}
     <ul>
     {% for h1 in page.toc %}
@@ -30,6 +31,7 @@ Here is an example of using that field to render a two-level table of contents:
     {% endfor %}
     </ul>
 {% endif %}
+{%- endraw %}
 ```
 
 While headers are neatly ordered in this example, it will work just as well with disjoint headers.

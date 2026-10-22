@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use errors::Result;
 use site::Site;
 
-use crate::console;
+use crate::messages;
 
 pub fn check(
     root_dir: &Path,
@@ -11,6 +11,7 @@ pub fn check(
     base_path: Option<&str>,
     base_url: Option<&str>,
     include_drafts: bool,
+    skip_external_links: bool,
 ) -> Result<()> {
     let bp = base_path.map(PathBuf::from).unwrap_or_else(|| PathBuf::from(root_dir));
     let mut site = Site::new(bp, config_file)?;
@@ -22,8 +23,11 @@ pub fn check(
     if include_drafts {
         site.include_drafts();
     }
+    if skip_external_links {
+        site.skip_external_links_check();
+    }
     site.load()?;
-    console::check_site_summary(&site);
-    console::warn_about_ignored_pages(&site);
+    messages::check_site_summary(&site);
+    messages::warn_about_ignored_pages(&site);
     Ok(())
 }
